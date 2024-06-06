@@ -5101,3 +5101,84 @@ imbuhanAkhiran = {
 "kan":"کن", "nya":"ڽ", "kah":"که", "lah":"له", "an":"ن", "i":"ي",
 };
 
+if (mw.config.get('wgNamespaceNumber') === 0) {
+  var cache = null;
+  var RumiJawi = null;
+  /**
+   * Tukar teks rumi kepada jawi.
+   * @param src teks untuk dijawikan.
+   * @param noRecursive
+   */
+  var convertToJawi = function (src, noRecursive) {
+    if (kamus[src]) { // Kalau ada entri dalam kamus, gunakannya.
+      src = src.replace(new RegExp('\\b' + src + '\\b', 'i'), kamus[src]);
+    } else if (!noRecursive) {
+      for (var i in imbuhanAkhiran) {
+        src = src.replace(RumiJawi.suffixes[i], suffixProcessor);
+      }
+    }
+    return src;
+  };
+  var prefixProcessor = function (a, b, c) {
+    var d = convertToJawi(c);
+    return d == c ? a : (imbuhanAwalan[b.toLowerCase()] + d);
+  };
+  var suffixProcessor = function (a, b, c) {
+    var d = convertToJawi(b, true);
+    return d == b ? a : (d + imbuhanAkhiran[c]);
+  };
+  $('#p-interaction ul').append('<li id="ca-nstab-rkj"><span><a><input id="togol-rkj" type="checkbox"></a><a><label for="togol-rkj">      Tukar ke Jawi</label></a></span></li>');
+  $('#togol-rkj').click(function () {
+    var $mwContentText = $('#mw-content-text');
+    if (this.checked) {
+      cache = cache || $mwContentText.html(); // Simpan teks asal.
+      RumiJawi = RumiJawi || {
+        entries: (function() {
+          var r = [];
+          for (var i in kamus) { // Proses kata-kata yg ada dlm kamus.
+            r[i] = new RegExp('\\b' + i + '\\b', 'gi');
+          }
+          return r;
+        }) (),
+        prefixes: (function() {
+          var r = {};
+          for (var i in imbuhanAwalan) { // Proses imbuhan awalan.
+            r[i] = new RegExp('(\\b' + i + ')(\\w+)\\b', 'gi');
+          }
+          return r;
+        }) (),
+        suffixes: (function() {
+          var r = [];
+          for (var i in imbuhanAkhiran) {
+            r[i] = new RegExp('\\b(\\w+)(' + i + ')\\b', 'i');
+          }
+          return r;
+        }) ()
+      };
+      $mwContentText.contents().map(function recursive() {
+        var $cs = $(this).contents();
+        if ($cs.length > 0) {
+          $cs.map(recursive);
+        } else {
+          var s,
+          i;
+          if ((s = this.textContent) === '') {
+            return;
+          }
+          for (i in kamus) { // Proses kata-kata yg ada dlm kamus.
+            s = s.replace(RumiJawi.entries[i], kamus[i]);
+          }
+          for (i in imbuhanAwalan) { // Proses imbuhan awalan.
+            s = s.replace(RumiJawi.prefixes[i], prefixProcessor);
+          }
+          this.textContent = s;
+        }
+      });
+      $mwContentText.attr('dir', 'rtl').attr('class', 'mw-content-rtl');
+    } 
+    else if (cache !== null) {
+      $mwContentText.attr('dir', 'ltr').attr('class', 'mw-content-ltr').html(cache);
+      cache = null;
+    }
+  });
+}
