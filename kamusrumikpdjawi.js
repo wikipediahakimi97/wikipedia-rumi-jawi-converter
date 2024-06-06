@@ -1,5 +1,10 @@
-{
-"kamus": {
+/*
+ * PERHATIAN: Diambil dari halaman Pengguna:Kurniasan/kamusrumikpdjawi.js
+ * Kata-kata tambahan adalah bersumber Kamus Dewan Perdana.
+ */
+
+kamus = {
+/******************************* KATA DASAR *******************************/
 /********************************* HURUF A **********************************/
 "a cappella":"اکاڤيلا","akapela":"اکاڤيلا",
 "a go go":"اݢوݢو","agogo":"اݢوݢو",
@@ -5070,9 +5075,10 @@
 "zara":"زارا",
 "Zayed":"زايد",
 "zimbabwe":"زيمببوي",
-},
-  
-"imbuhanAwalan": {
+};
+
+
+imbuhanAwalan = {
 "ber":"بر",
 "se":"س",
 "di":"د",
@@ -5088,10 +5094,10 @@
 "peny":"ڤڽ",
 "pen":"ڤن",
 "per":"ڤر",
-"pe":"ڤ",
-},
-  
-"imbuhanAkhiran": {
+"pe":"ڤ"
+};
+
+imbuhanAkhiran = {
 "kan":"کن", "nya":"ڽ", "kah":"که", "lah":"له", "an":"ن", "i":"ي",
-}
-}
+};
+
