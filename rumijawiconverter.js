@@ -508,7 +508,7 @@ kamus = {
 "akondroplasia":"اكوندروڤلاسيا",
 "akong":"اكوڠ",
 "akordion":"اكورديون",
-"akrab":"اقرب", "mengakrab":"مڠقرب","pengakrab":"ڤڠقرب",
+"akrab":["اقرب","عقرب"], "mengakrab":"مڠقرب","pengakrab":"ڤڠقرب",
 "seakrab":"سأقرب", "keakrab":"سأقرب",
 /*
  * "akrab":"عقرب",
