@@ -1,9 +1,11 @@
 /*
- * PERHATIAN: Diambil dari halaman Pengguna:Kurniasan/kamusrumikpdjawi.js
- * Kata-kata tambahan adalah bersumber Kamus Dewan Perdana.
+ * PERHATIAN: Kemas kini entri terbaharu Kamus Dewan Perdana pada muka surat ke-65.
  */
 
 kamus = {
+/******************************* SIMBOL *******************************/
+",":"⹁",
+";":"⁏",
 /******************************* KATA DASAR *******************************/
 /********************************* HURUF A **********************************/
 "a cappella":"اکاڤيلا","akapela":"اکاڤيلا",
@@ -836,11 +838,48 @@ kamus = {
 "al-Khabir":"الخبير",
 "al-Khafid":"الخافض",
 "al-Khaliq":"الخالق", 
-"alkil":"الكيل", 
+"alkil":"الكيل",
+"alkimi":"الکيمي",
+"alkimia":"الکيميا",
+"alkisah":"القصه",
+"al-Kitab":"الکتاب",
+"Alkitab":"الکتاب",
+"alkohol":"الکوهول",
+"alkoholisme":"الکوهوليسمى",
+"alkoholometer":"الکوهولوميتر",
+"alkoholuria":"الکوهولوريا",
+"alkonya":"الکوڽا",
+"alku":"الکو",
+"alkuna":"الکونا",
+"Allahuakbar":"الله اکبر",
+"Allahumma":"اللهم",
 "Allayarham":"الله يرحم",
 "Allayarhamah":"الله يرحمة",
+"Allahyarhamha":"الله يرحمها",
+"al-Lail":"الليل",
+"allamah":"علامة",
+"al-Latif":"اللطيف",
+"alma mater:"الما ماتر", "sealma mater":"سألما ماتر",
+"al-Ma'arij":"المعارج",
+"al-Ma'un":"الماعون",
+"al-Mahdi":"المهدي",
+"al-Maidah":"المائدة",
+"al-Majid":"المجيد",
+/*
+* "al-Majid":"الماجد",
+*/
+"Almakbud":"المعبود",
+"almaktub":"المکتوب",
+"al-Malik":"المالك",
+"almalun":"الملعون",
+"almanak":"المناک",
+"almadin":"المندين",
+"al-Mani'":"المانع",
+"al-Maqamul Amin"المقام الأمين",
 "almarhum":"المرحوم",
 "almarhumah":"المرحومة",
+"almari":"الماري",
+
 "aloi":"الوي",
 "alor":"الور",
 "alternatif":"الترناتيف",
