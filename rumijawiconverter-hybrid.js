@@ -1,5 +1,5 @@
 /*
- * PERHATIAN: Kemas kini entri terbaharu Kamus Dewan Perdana pada muka surat ke-65. Kemas kini entri baris 446
+ * PERHATIAN: Kemas kini entri terbaharu Kamus Dewan Perdana pada muka surat ke-65.
  */
 
 kamus = {
