@@ -3173,7 +3173,7 @@ kamus = {
 "puluh":"puluh",
 "puncak":"puncq",
 "punca":"punca",
-"punyai":"puɲaʔi", "punya":"puɲa",
+"punyai":"puɲaʔi",
 "pun":"pun",
 "pupu":"pupu",
 "pupus":"pupus",
