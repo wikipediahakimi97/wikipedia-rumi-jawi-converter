@@ -1228,7 +1228,7 @@ kamus = {
 "destinasi":"distinasi",
 "dewan":"diuan",
 "dewasa":"diuas",
-"di":"d",
+"di ":"d",
 "dia":"di",
 "diabetes":"diabitis",
 "diagnosis":"diagnusis",
