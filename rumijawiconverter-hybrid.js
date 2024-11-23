@@ -3842,7 +3842,7 @@ kamus = {
 "takluk":"tʕluq",
 "taklukan":"tʕluqn",
 "takluknya":"tʕluqɲ",
-"takrif":"tʕrif",
+"takrif":"tʕrif", "nakrif":"nʕrif",
 "taksir":"tksir",
 "taksiran":"tksirn",
 "taktik":"tktik",
