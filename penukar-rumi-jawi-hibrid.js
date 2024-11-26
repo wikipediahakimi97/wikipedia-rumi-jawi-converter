@@ -3,37 +3,34 @@
 /* Original author: [[Pengguna:Hakimi97]] (https://ms.wikipedia.org/wiki/Pengguna:Hakimi97/penukar-rumi-jawi-hibrid.js) */
 
 /* This dictionary converts ms-Latn to ms-Arab by theoretically obeying the following principles:
-* (1) The original Rumi main text should be lowerred case first. Any punctuations 
-* that are circumfixed by numbers should remain as original Rumi style. Put the 
-* limit so that only numbers should be in LTR configuration. Ensure the other 
-* punctuations and whitespaces should be converted to Jawi’s version first and 
-* act as the word boundaries.
-* (2) The individual letters from the Rumi main text must match the letter 
-* sequence to the entries on kamus dictionary (located on Github). Prioritizing 
-* to match the letters to the kamus entries with the most letters. After matching, 
-* the words should be converted into corresponding kamusipa symbols, and the 
-* kamusipa symbols should and pass through kamusipaToJawi (renamed ipaToJawi, 
-* without punctuations) mapping to obtain the Jawi letters.
-* (5) If there are adjacent Rumi letters prefixing, suffixing or circumfixing the 
-* converted Jawi letters,  the adjacent Rumi letters should be mapped to the 
-* imbuhanAwalan dictionary, and the suffixing Rumi letters should be mapped to the
-* imbuhanAkhiran dictionary (fetch from Github link). The priority of matching 
-* imbuhanAwalan and imbuhanAkhiran should be given to the longest entries within 
-* imbuhanAwalan and imbuhanAkhiran dictionaries first (for example “menge” is more 
-* prioritized for conversion compared to “mem”). The prefix and suffix converters 
-* shall be allowed to concurrently exist to circumfix the converted Jawi words 
-* through kamus dictionary. The resulting individual Jawi letters that has been 
-* converted through kamus, imbuhanAwalan and imbuhanAkhiran dictionaries should be 
-* linked together in contextual Arabic forms with whitespaces and punctuations 
-* treated as word boundaries.
-* (6) After conversion through kamus, imbuhanAwalan and imbuhanAkhiran dictionaries,
-* if there are remnant Rumi letters left unconverted, by default the Rumi letters 
-* should be first detect whether got digraph or not, if got digraph then convert
-* the digraph into Jawi letters. And then the remaining unconverted Rumi letters
-* should be treated as defaultipa and pass through defaultipaToJawi (similar to 
-* ipaToJawi but only converts defaults Latin letters into Jawi letters), and link
-* them in contextual Arabic forms with whitespaces and punctuations treated as 
-* word boundaries.
+* (1) The original Rumi main text should be lowerred case first. Any punctuations that 
+*     are circumfixed by numbers should remain as original Rumi style. Put the limit so 
+*     that only numbers should be in LTR configuration. 
+* (2) Ensure the other punctuations and whitespaces should be converted to Jawi’s version
+*     first through punctuationsRumiToJawi mapping. The whitespaces must act as the word 
+*     boundaries and prevent the contextual form of Jawi letters to overcross the boundaries
+*     of whitespaces.
+* (3) If the letter sequence from the main Rumi text matches the entries on kamus dictionary
+*     (fetched from Github), the words should be converted into corresponding Jawi letters 
+*     with IPA serves as intermediary through ipaToJawi mapping. 
+* (4) After that, if there are adjacent Rumi letters prefixing, suffixing or circumfixing 
+*     the converted Jawi letters,  the adjacent Rumi letters should be mapped to the 
+*     imbuhanAwalan dictionary, and the suffixing Rumi letters should be mapped to the 
+*     imbuhanAkhiran dictionary (fetch from Github link). The priority of matching 
+*     imbuhanAwalan and imbuhanAkhiran should be given to the longest entries within 
+*     imbuhanAwalan and imbuhanAkhiran dictionaries first (for example “menge” is more 
+*     prioritized for conversion compared to “mem”). The prefix and suffix converters shall
+*     be allowed to concurrently exist to circumfix the converted Jawi words through kamus 
+*     dictionary. 
+* (5) The resulting individual Jawi letters that has been converted through kamus, 
+*     imbuhanAwalan and imbuhanAkhiran dictionaries should be linked together in contextual 
+*     Arabic forms with whitespaces and punctuations treated as word boundaries.
+* (6) If there are remnant Rumi letters left unconverted, by default the Rumi letters should 
+*     be first detect whether got digraph or not, if got digraph then convert the digraph into
+*     Jawi letters through digraphsToJawi mapping. And then the remaining unconverted Rumi 
+*     letters should be converted into Jawi letters through directRumiToJawi mapping, and link
+*     all converted Jawi letters produced by (8) in contextual Arabic forms with whitespaces 
+*     and punctuations treated as word boundaries.
 */
 
 
@@ -49,73 +46,28 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
   const processedTextCache = {};
 
   const ipaToJawi = {
-    // Mapping of IPA to Jawi
-    'ʔ': 'ء',
-    'a': 'ا',
-    'b': 'ب',
-    't': 'ت',
-    'θ': 'ث',
-    'j': 'ج',
-    'c': 'چ',
-    'ħ': 'ح',
-    'χ': 'خ',
-    'd': 'د',
-    'ð': 'ذ',
-    'r': 'ر',
-    'z': 'ز',
-    'x': 'ز',
-    's': 'س',
-    'ʃ': 'ش',
-    'ṣ': 'ص',
-    'ḍ': 'ض',
-    'ṭ': 'ط',
-    'ẓ': 'ظ',
-    'ʕ': 'ع',
-    'ɣ': 'غ',
-    'ŋ': 'ڠ',
-    'f': 'ف',
-    'p': 'ڤ',
-    'q': 'ق',
-    'k': 'ک',
-    'g': 'ݢ',
-    'l': 'ل',
-    'm': 'م',
-    'n': 'ن',
-    'ɲ': 'ڽ',
-    'w': 'و',
-    'u': 'و',
-    'o': 'و',
-    'v': 'ۏ',
-    'h': 'ه',
-    'ẗ': 'ة',
-    'y': 'ي',
-    'i': 'ي',
-    'e': 'ي',
-    'ə': 'ى',
-    'á': 'أ',
-    'í': 'إ',
-    'ý': 'ئ',
-    'ẃ': 'ؤ',
-    ' ': ' ',
-    '.': '.',
-    ',': '⹁',
-    '!': '!',
-    '?': '؟',
-    ':': ':',
-    ';': '⁏',
-    '(': '(',
-    ')': ')',
-    '-': 'ـ',
-    "'": '’',
-    '"': '“',
+    'ʔ': 'ء', 'a': 'ا', 'b': 'ب', 't': 'ت', 'θ': 'ث', 'j': 'ج',
+    'c': 'چ', 'ħ': 'ح', 'χ': 'خ', 'd': 'د', 'ð': 'ذ', 'r': 'ر',
+    'z': 'ز', 'x': 'ز', 's': 'س', 'ʃ': 'ش', 'ṣ': 'ص', 'ḍ': 'ض',
+    'ṭ': 'ط', 'ẓ': 'ظ', 'ʕ': 'ع', 'ɣ': 'غ', 'ŋ': 'ڠ', 'f': 'ف',
+    'p': 'ڤ', 'q': 'ق', 'k': 'ک', 'g': 'ݢ', 'l': 'ل', 'm': 'م',
+    'n': 'ن', 'ɲ': 'ڽ', 'w': 'و', 'u': 'و', 'o': 'و', 'v': 'ۏ',
+    'h': 'ه', 'ẗ': 'ة', 'y': 'ي', 'i': 'ي', 'e': 'ي', 'ə': 'ى',
+    'á': 'أ', 'í': 'إ', 'ý': 'ئ', 'ẃ': 'ؤ',
   };
 
-  const digraphsToJawi = {
-    sy: 'ش',
-    ny: 'ڽ',
-    ng: 'ڠ',
-    kh: 'خ',
-    gh: 'غ',
+  const punctuationsRumiToJawi = {
+    ' ': ' ', '.': '.', ',': '،',
+    '!': '!', '?': '؟', ':': ':', ';': '؛', '(': '(',
+    ')': ')', '-': 'ـ', "'": '’', '"': '“',
+  };
+
+  const digraphsToIPA = {
+    sy: 'ʃ',
+    ny: 'ɲ',
+    ng: 'ŋ',
+    kh: 'χ',
+    gh: 'ɣ',
   };
 
   const loadKamusData = () => {
@@ -157,159 +109,93 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     };
   };
 
-  const convertToIPA = (word) => {
-    if (processedTextCache[word]) return processedTextCache[word];
-
-    let result = word;
-
-    // Match against dictionary entries
-    for (const entry of Object.keys(RumiToIPA.entries)) {
-      if (result.startsWith(entry)) {
-        result = RumiToIPA.entries[entry];
-        result = applyAffixes(result);
-        processedTextCache[word] = result;
-        return result;
-      }
-    }
-
-    // Convert remaining text
-    result = convertDigraphsToIPA(word);
-    result = applyAffixes(result);
-    result = convertLettersToIPA(result);
-
-    processedTextCache[word] = result;
-    return result;
+  const applyPunctuationAndWhitespace = (text) => {
+    return text
+      .split('')
+      .map((char) => punctuationsRumiToJawi[char] || char)
+      .join('');
   };
 
-  const applyAffixes = (word) => {
-    let result = word;
+  const applyAffixes = (word, isPrefix) => {
+    const affixes = isPrefix ? RumiToIPA.prefixes : RumiToIPA.suffixes;
+    const affixKeys = Object.keys(affixes);
 
-    // Skip affix conversion if the word is already in the kamus dictionary
-    if (Object.values(RumiToIPA.entries).includes(word)) {
-      return result;
-    }
-    
-    let prefixAdded = false;
-    let suffixAdded = false;
+    for (const affix of affixKeys) {
+      const condition = isPrefix
+        ? word.startsWith(affix)
+        : word.endsWith(affix);
 
-    // Apply prefixes
-    for (const prefix of Object.keys(RumiToIPA.prefixes)) {
-      if (result.startsWith(prefix)) {
-        result = RumiToIPA.prefixes[prefix] + result.slice(prefix.length);
-        prefixAdded = true;
-        break;
+      if (condition) {
+        const replacement = affixes[affix];
+        return isPrefix
+          ? replacement + word.slice(affix.length)
+          : word.slice(0, -affix.length) + replacement;
       }
     }
-
-    // Apply suffixes
-    for (const suffix of Object.keys(RumiToIPA.suffixes)) {
-      if (result.endsWith(suffix)) {
-        result = result.slice(0, -suffix.length) + RumiToIPA.suffixes[suffix];
-        suffixAdded = true;
-        break;
-      }
-    }
-
-    // Allow circumfixing if both prefix and suffix are applicable
-    if (prefixAdded && suffixAdded) {
-      for (const prefix of Object.keys(RumiToIPA.prefixes)) {
-        for (const suffix of Object.keys(RumiToIPA.suffixes)) {
-          if (
-            result.startsWith(RumiToIPA.prefixes[prefix]) &&
-            result.endsWith(RumiToIPA.suffixes[suffix])
-          ) {
-            result =
-              RumiToIPA.prefixes[prefix] +
-              result.slice(
-                RumiToIPA.prefixes[prefix].length,
-                -RumiToIPA.suffixes[suffix].length
-              ) +
-              RumiToIPA.suffixes[suffix];
-            break;
-          }
-        }
-      }
-    }
-
-    return result;
+    return word;
   };
 
-  // Conversion Helpers: Convert Digraphs, Letters, Contextual Formatting
+  const convertDigraphsToIPA = (word) => {
+    for (const digraph in digraphsToIPA) {
+      word = word.replace(new RegExp(digraph, 'gi'), digraphsToIPA[digraph]);
+    }
+    return word;
+  };
 
-  const mapIPAtoJawi =
-  (ipa) => {
+  const convertIPAtoJawi = (ipa) => {
     return ipa
       .split('')
       .map((symbol) => ipaToJawi[symbol] || symbol)
       .join('');
   };
 
-  const convertLettersToIPA = (word) => {
-    return word
-      .split('')
-      .map((letter) => ipaToJawi[letter] || letter)
+  const processWord = (word) => {
+    // Check dictionary first
+    if (RumiToIPA.entries[word]) {
+      return convertIPAtoJawi(RumiToIPA.entries[word]);
+    }
+
+    // Process digraphs
+    word = convertDigraphsToIPA(word);
+
+    // Apply prefixes
+    word = applyAffixes(word, true);
+
+    // Apply suffixes
+    word = applyAffixes(word, false);
+
+    // Map IPA to Jawi
+    return convertIPAtoJawi(word);
+  };
+
+  const processText = (text) => {
+    return text
+      .split(/(\s+|[^a-zA-Z]+)/)
+      .map((token) => {
+        if (processedTextCache[token]) {
+          return processedTextCache[token];
+        }
+
+        if (/^[a-zA-Z]+$/.test(token)) {
+          const processedWord = processWord(token.toLowerCase());
+          processedTextCache[token] = processedWord;
+          return processedWord;
+        }
+
+        // Handle punctuation and other non-alphabetic characters
+        const processedNonAlphabetic = applyPunctuationAndWhitespace(token);
+        processedTextCache[token] = processedNonAlphabetic;
+        return processedNonAlphabetic;
+      })
       .join('');
   };
 
-  const convertDigraphsToIPA = (word) => {
-    for (const digraph in digraphsToJawi) {
-      const regExp = new RegExp(digraph, 'gi');
-      word = word.replace(regExp, digraphsToJawi[digraph]);
-    }
-    return word;
-  };
-
-  const convertTextToJawi = async (text) => {
-    const tokens = text.split(/(\b|\s|[%.,!?;:])/);
-
-    return (
-      await Promise.all(
-        tokens.map(async (token, index, tokensArray) => {
-          if (!token.trim()) return token;
-
-          // Handle punctuation-surrounded numbers (LTR rule for numbers)
-          if (isPunctuationSurroundedByNumbers(token, tokensArray, index)) {
-            return `${tokensArray[index - 1]}${token}${tokensArray[index + 1]}`;
-          }
-
-          if (token === '%' && tokensArray[index - 1]?.match(/^\d+$/)) {
-            return `${tokensArray[index - 1]}%`;
-          }
-
-          let ipa = convertToIPA(token.toLowerCase());
-          let jawi = mapIPAtoJawi(ipa);
-
-          // Convert Σ to three-quarter hamza
-          if (jawi.includes('Σ')) {
-            await mw.loader.using('mediawiki.util');
-            jawi = jawi.replace(
-              /Σ/g,
-              '<span style="bottom: 0.26em;position: relative;">ء</span>'
-            );
-          }
-
-          processedTextCache[token] = jawi;
-          return jawi;
-        })
-      )
-    ).join('');
-  };
-
-  const isPunctuationSurroundedByNumbers = (token, tokensArray, index) => {
-    const isPunctuation = token.match(/[.,!?;:]/);
-    const prevIsNumber = tokensArray[index - 1]?.match(/^\d+$/);
-    const nextIsNumber = tokensArray[index + 1]?.match(/^\d+$/);
-    return isPunctuation && prevIsNumber && nextIsNumber;
-  };
-
-  // Process content in DOM
   const processContent = async ($content) => {
     $content.contents().each(async function () {
       if (this.nodeType === 3) {
-        let text = this.textContent;
+        const text = this.textContent;
         if (text.trim()) {
-          text = await convertTextToJawi(text);
-          this.textContent = text;
+          this.textContent = processText(text);
         }
       } else {
         await processContent($(this));
@@ -317,56 +203,17 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     });
   };
 
-  // Toggle switch slider with embedded CSS
   $('head').append(`
-	<style>
-      .switch {
-        position: relative;
-        display: inline-block;
-        width: 40px;
-        height: 22px;
-      }
-      .switch input {
-        opacity: 0;
-        width: 0;
-        height: 0;
-      }
-      .slider {
-        position: absolute;
-        cursor: pointer;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        background-color: #c8ccd1;
-        transition: 0.3s;
-        border-radius: 50px;
-      }
-      .slider:before {
-        position: absolute;
-        content: "";
-        height: 18px;
-        width: 18px;
-        left: 2px;
-        bottom: 2px;
-        background-color: white;
-        transition: 0.3s;
-        border-radius: 50%;
-        box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
-      }
-      input:checked + .slider {
-        background-color: #36c;
-      }
-      input:checked + .slider:before {
-        transform: translateX(18px);
-      }
-      .switch input:focus + .slider {
-        box-shadow: 0 0 2px 2px rgba(54, 140, 204, 0.6);
-      }
-	</style>
+    <style>
+      .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
+      .switch input { opacity: 0; width: 0; height: 0; }
+      .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #c8ccd1; transition: 0.3s; border-radius: 50px; }
+      .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 2px; bottom: 2px; background-color: white; transition: 0.3s; border-radius: 50%; box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2); }
+      input:checked + .slider { background-color: #36c; }
+      input:checked + .slider:before { transform: translateX(18px); }
+    </style>
   `);
 
-  // Append toggle to UI
   $('#p-interaction ul').append(`
     <li id="ca-nstab-rkj">
       <span>
@@ -379,20 +226,19 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     </li>
   `);
 
-  // Toggle behavior
   $('#togol-rkj').on('change', async function () {
     if (!RumiToIPA) await loadKamusData();
 
-    let $content = $('#mw-content-text');
+    const $content = $('#mw-content-text');
 
     if (this.checked) {
       if (!cache) {
-        cache = $content.clone(); // Backup original content
+        cache = $content.html();
+        await processContent($content);
       }
-      await processContent($content); // Convert to Jawi
     } else {
       if (cache) {
-        $content.replaceWith(cache.clone()); // Restore original content
+        $content.html(cache);
       }
     }
   });
