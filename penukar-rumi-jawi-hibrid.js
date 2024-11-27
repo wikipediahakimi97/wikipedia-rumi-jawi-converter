@@ -1,4 +1,12 @@
-/* Change the text from rumi to jawi script. Current version is a prototype, use it with cautions! */
+/**
+ ** LOG:
+ ** Updated on 27th November 2024
+ **
+ **/
+
+/* Convert the text from rumi to jawi scripts using the hybrid method (dictionaries first, letters later).
+* This version is has been stabilized for general usage.
+*/
 
 /* Original author: [[Pengguna:Hakimi97]] (https://ms.wikipedia.org/wiki/Pengguna:Hakimi97/penukar-rumi-jawi-hibrid.js) */
 
