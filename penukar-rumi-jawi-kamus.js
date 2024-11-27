@@ -4,7 +4,7 @@
  **
  **/
 
-/* Change the text from rumi to jawi script */
+/* Change the text from rumi to jawi script using dictionary method.*/
 
 /* Original author: [[Pengguna:Hakimi97]] (https://ms.wikipedia.org/wiki/Pengguna:Hakimi97/penukar-rumi-jawi-kamus.js) */
 
