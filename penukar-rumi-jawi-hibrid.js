@@ -42,32 +42,48 @@
 
 if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))) {
   let cache = null;
-  let RumiToIPA = null;
+  let RumiToCodePoint = null;
   const processedTextCache = {};
 
-  const ipaToJawi = {
-    'ʔ': 'ء', 'a': 'ا', 'b': 'ب', 't': 'ت', 'θ': 'ث', 'j': 'ج',
-    'c': 'چ', 'ħ': 'ح', 'χ': 'خ', 'd': 'د', 'ð': 'ذ', 'r': 'ر',
-    'z': 'ز', 'x': 'ز', 's': 'س', 'ʃ': 'ش', 'ṣ': 'ص', 'ḍ': 'ض',
-    'ṭ': 'ط', 'ẓ': 'ظ', 'ʕ': 'ع', 'ɣ': 'غ', 'ŋ': 'ڠ', 'f': 'ف',
-    'p': 'ڤ', 'q': 'ق', 'k': 'ک', 'g': 'ݢ', 'l': 'ل', 'm': 'م',
-    'n': 'ن', 'ɲ': 'ڽ', 'w': 'و', 'u': 'و', 'o': 'و', 'v': 'ۏ',
-    'h': 'ه', 'ẗ': 'ة', 'y': 'ي', 'i': 'ي', 'e': 'ي', 'ə': 'ى',
-    'á': 'أ', 'í': 'إ', 'ý': 'ئ', 'ẃ': 'ؤ',
+  const rumiToCodePoints = {
+    'a': 'A1', 'b': 'B0', 't': 'T0', 'j': 'J0', 'c': 'C0', 'd': 'D0',
+    'r': 'R0', 'z': 'Z0', 'x': 'Z0', 's': 'S0', 'f': 'F0',
+    'p': 'P0', 'q': 'Q0', 'k': 'K0', 'g': 'G0', 'l': 'L0', 'm': 'M0',
+    'n': 'N0', 'w': 'W0', 'u': 'W0', 'o': 'W0', 'v': 'V0', 'h': 'H0',
+    'y': 'Y0', 'i': 'Y0', 'e': 'Y0', 
+  };
+
+  const codePointsToJawi = {
+    'A0': 'ء', 'A1': 'ا', 'B0': 'ب', 'T0': 'ت', 'T2': 'ث', 'J0': 'ج',
+    'C0': 'چ', 'H1': 'ح', 'K1': 'خ', 'D0': 'د', 'D1': 'ذ', 'R0': 'ر',
+    'Z0': 'ز', 'S0': 'س', 'S1': 'ش', 'S2': 'ص', 'D2': 'ض', 'T3': 'ط',
+    'Z1': 'ظ', 'A2': 'ع', 'G1': 'غ', 'N2': 'ڠ', 'F0': 'ف', 'P0': 'ڤ',
+    'Q0': 'ق', 'K0': 'ک', 'G0': 'ݢ', 'L0': 'ل', 'M0': 'م', 'N0': 'ن',
+    'N1': 'ڽ', 'W0': 'و', 'V0': 'ۏ', 'H0': 'ه', 'T1': 'ة', 'Y0': 'ي',
+    'E0': 'ى', 'A4': 'أ', 'I4': 'إ', 'Y4': 'ئ', 'W4': 'ؤ',
   };
 
   const punctuationsRumiToJawi = {
-    ' ': ' ', '.': '.', ',': '،',
-    '!': '!', '?': '؟', ':': ':', ';': '؛', '(': '(',
-    ')': ')', '-': 'ـ', "'": '’', '"': '“',
+    ' ': ' ',
+    '.': '.', 
+    ',': '⹁',
+    '!': '!',
+    '?': '؟',
+    ':': ':',
+    ';': '⁏',
+    '(': '(',
+    ')': ')',
+    '-': ' - ',
+    "'": '’',
+    '"': '“',
   };
 
-  const digraphsToIPA = {
-    sy: 'ʃ',
-    ny: 'ɲ',
-    ng: 'ŋ',
-    kh: 'χ',
-    gh: 'ɣ',
+  const digraphsToCodePoints = {
+    sy: 'S1',
+    ny: 'N1',
+    ng: 'N2',
+    kh: 'K1',
+    gh: 'G1',
   };
 
   const loadKamusData = () => {
@@ -82,17 +98,17 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       })
       .then((scriptContent) => {
         eval(scriptContent); // Load kamus, imbuhanAwalan, imbuhanAkhiran
-        initRumiToIPA();
+        initRumiToCodePoint();
       })
       .catch((error) => console.error(error.message));
   };
 
-  const initRumiToIPA = () => {
-    if (RumiToIPA) return;
+  const initRumiToCodePoint = () => {
+    if (RumiToCodePoint) return;
 
     const sortedKamusKeys = Object.keys(kamus).sort((a, b) => b.length - a.length);
 
-    RumiToIPA = {
+    RumiToCodePoint = {
       entries: Object.fromEntries(
         sortedKamusKeys.map((word) => [word.toLowerCase(), kamus[word]])
       ),
@@ -109,98 +125,137 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     };
   };
 
-  const applyPunctuationAndWhitespace = (text) => {
-    return text
+	const applyPunctuationAndWhitespace = (text) => {
+	  return text
+	    .split('')
+	    .map((char) => punctuationsRumiToJawi[char] || char)
+	    .join('');
+	};
+
+
+  const convertCodePointsToJawi = (codePointString) => {
+    return codePointString.replace(/([A-Z][0-9]+)/g, (match) => codePointsToJawi[match] || match);
+  };
+
+  const convertToCodePoints = (word) => {
+    const digraphRegex = new RegExp(Object.keys(digraphsToCodePoints).join('|'), 'gi');
+    word = word.replace(digraphRegex, (match) => digraphsToCodePoints[match.toLowerCase()] || match);
+
+    return word
       .split('')
-      .map((char) => punctuationsRumiToJawi[char] || char)
-      .join('');
-  };
-
-  const applyAffixes = (word, isPrefix) => {
-    const affixes = isPrefix ? RumiToIPA.prefixes : RumiToIPA.suffixes;
-    const affixKeys = Object.keys(affixes);
-
-    for (const affix of affixKeys) {
-      const condition = isPrefix
-        ? word.startsWith(affix)
-        : word.endsWith(affix);
-
-      if (condition) {
-        const replacement = affixes[affix];
-        return isPrefix
-          ? replacement + word.slice(affix.length)
-          : word.slice(0, -affix.length) + replacement;
-      }
-    }
-    return word;
-  };
-
-  const convertDigraphsToIPA = (word) => {
-    for (const digraph in digraphsToIPA) {
-      word = word.replace(new RegExp(digraph, 'gi'), digraphsToIPA[digraph]);
-    }
-    return word;
-  };
-
-  const convertIPAtoJawi = (ipa) => {
-    return ipa
-      .split('')
-      .map((symbol) => ipaToJawi[symbol] || symbol)
+      .map((char) => rumiToCodePoints[char] || char)
       .join('');
   };
 
   const processWord = (word) => {
-    // Check dictionary first
-    if (RumiToIPA.entries[word]) {
-      return convertIPAtoJawi(RumiToIPA.entries[word]);
-    }
+	  if (RumiToCodePoint.entries[word]) {
+	    return convertCodePointsToJawi(RumiToCodePoint.entries[word]);
+	  }
+	
+	  let result = '';
+	  let start = 0;
+	
+	  while (start < word.length) {
+	    let matchedSubstring = null;
+	    let matchedJawi = null;
+	
+	    for (let end = word.length; end > start; end--) {
+	      const substring = word.slice(start, end).toLowerCase();
+	
+	      if (RumiToCodePoint.entries[substring]) {
+	        if (
+	          !matchedSubstring ||
+	          substring.length > matchedSubstring.length ||
+	          (substring.length === matchedSubstring.length && substring < matchedSubstring)
+	        ) {
+	          matchedSubstring = substring;
+	          matchedJawi = convertCodePointsToJawi(RumiToCodePoint.entries[substring]);
+	        }
+	      }
+	    }
+	
+	    if (matchedSubstring) {
+	      result += matchedJawi;
+	      start += matchedSubstring.length;
+	    } else {
+	      // Process remaining characters with prefix and suffix rules
+	      const remainingWord = word.slice(start).toLowerCase();
+	
+	      // Attempt to apply prefixes
+	      const prefixMatch = Object.entries(RumiToCodePoint.prefixes).find(([prefix]) =>
+	        remainingWord.startsWith(prefix)
+	      );
+	
+	      if (prefixMatch) {
+	        const [prefix, prefixCode] = prefixMatch;
+	        const strippedWord = remainingWord.slice(prefix.length);
+	        const baseCode = convertToCodePoints(strippedWord);
+	        const prefixedCode = prefixCode + baseCode;
+	        result += convertCodePointsToJawi(prefixedCode);
+	        break;
+	      }
+	
+	      // Attempt to apply suffixes
+	      const suffixMatch = Object.entries(RumiToCodePoint.suffixes).find(([suffix]) =>
+	        remainingWord.endsWith(suffix)
+	      );
+	
+	      if (suffixMatch) {
+	        const [suffix, suffixCode] = suffixMatch;
+	        const strippedWord = remainingWord.slice(0, -suffix.length);
+	        const baseCode = convertToCodePoints(strippedWord);
+	        const suffixedCode = baseCode + suffixCode;
+	        result += convertCodePointsToJawi(suffixedCode);
+	        break;
+	      }
+	
+	      // No match found, convert the remaining word character-by-character
+	      const transformedWord = convertToCodePoints(remainingWord);
+	      result += convertCodePointsToJawi(transformedWord);
+	      break;
+	    }
+	  }
+	
+	  return result;
+	};
 
-    // Process digraphs
-    word = convertDigraphsToIPA(word);
-
-    // Apply prefixes
-    word = applyAffixes(word, true);
-
-    // Apply suffixes
-    word = applyAffixes(word, false);
-
-    // Map IPA to Jawi
-    return convertIPAtoJawi(word);
-  };
-
-  const processText = (text) => {
-    return text
-      .split(/(\s+|[^a-zA-Z]+)/)
-      .map((token) => {
-        if (processedTextCache[token]) {
-          return processedTextCache[token];
-        }
-
-        if (/^[a-zA-Z]+$/.test(token)) {
-          const processedWord = processWord(token.toLowerCase());
-          processedTextCache[token] = processedWord;
-          return processedWord;
-        }
-
-        // Handle punctuation and other non-alphabetic characters
-        const processedNonAlphabetic = applyPunctuationAndWhitespace(token);
-        processedTextCache[token] = processedNonAlphabetic;
-        return processedNonAlphabetic;
-      })
-      .join('');
-  };
+	const processText = (text) => {
+	  // Regex to detect numeric tokens
+	  const numericPattern = /^\d+([.,]\d+)*$/;
+	
+	  return text
+	    .split(/(\s+|[^a-zA-Z\d]+)/) // Split into tokens (words, spaces, and punctuation)
+	    .map((token) => {
+	      if (processedTextCache[token]) return processedTextCache[token];
+	
+	      if (numericPattern.test(token)) {
+	        // Preserve numeric tokens
+	        return (processedTextCache[token] = token);
+	      }
+	
+	      if (/^[a-zA-Z]+$/.test(token)) {
+	        // Process alphabetic words (Rumi words)
+	        return (processedTextCache[token] = processWord(token));
+	      }
+	
+	      // Apply punctuation and whitespace conversion to non-alphabetic tokens
+	      return (processedTextCache[token] = applyPunctuationAndWhitespace(token));
+	    })
+	    .join('');
+	};
 
   const processContent = async ($content) => {
-    $content.contents().each(async function () {
-      if (this.nodeType === 3) {
-        const text = this.textContent;
-        if (text.trim()) {
-          this.textContent = processText(text);
-        }
-      } else {
-        await processContent($(this));
-      }
-    });
+    const textNodes = [];
+    const collectTextNodes = (node) => {
+      if (node.nodeType === 3 && node.textContent.trim()) textNodes.push(node);
+      else $(node).contents().each(function () { collectTextNodes(this); });
+    };
+
+    collectTextNodes($content[0]);
+
+    for (const node of textNodes) {
+      node.textContent = processText(node.textContent);
+    }
   };
 
   $('head').append(`
@@ -226,20 +281,32 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     </li>
   `);
 
-  $('#togol-rkj').on('change', async function () {
-    if (!RumiToIPA) await loadKamusData();
-
-    const $content = $('#mw-content-text');
-
-    if (this.checked) {
-      if (!cache) {
-        cache = $content.html();
-        await processContent($content);
-      }
-    } else {
-      if (cache) {
-        $content.html(cache);
-      }
-    }
-  });
+	$('#togol-rkj').on('change', async function () {
+	  const $title = $('#firstHeading');
+	  const $content = $('#mw-content-text');
+	
+	  if (!RumiToCodePoint) await loadKamusData();
+	
+	  if (this.checked) {
+	    // Perform conversion to Jawi
+	    if (!cache) {
+	      cache = {
+	        title: $title.html(), // Cache the original Rumi title
+	        content: $content.html(), // Cache the original Rumi content
+	      };
+	    }
+	
+	    // Process title
+	    $title.text(processText($title.text()));
+	
+	    // Process content
+	    await processContent($content); // Convert and update content
+	  } else {
+	    // Restore to Rumi
+	    if (cache) {
+	      $title.html(cache.title); // Restore original title
+	      $content.html(cache.content); // Restore original content
+	    }
+	  }
+	});
 }
