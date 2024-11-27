@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 19th November 2024
+ ** Updated on 27th November 2024
  **
  **/
 
@@ -61,6 +61,7 @@
 
 if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))) {
   let cache = null;
+  let titleCache = null;
   let RumiJawi = null;
   const processedTextCache = {};
 
@@ -251,6 +252,29 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     });
   };
 
+  const processTitle = () => {
+    const $title = $('#firstHeading');
+    let text = $title.text();
+
+    if (text.trim()) {
+      initRumiJawi();
+      for (const word of Object.keys(kamus)) {
+        text = text.replace(RumiJawi.entries[word], () => kamus[word]);
+      }
+
+      for (const prefix of Object.keys(imbuhanAwalan)) {
+        text = text.replace(RumiJawi.prefixes[prefix], prefixProcessor);
+      }
+
+      text = processSuffixes(text);
+      text = convertPunctuationToArabic(text);
+      text = processThreeQuarterHamza(text);
+
+      $title.text(text);
+      replaceHamzaInDOM($title[0]);
+    }
+  };
+
   // Add toggle switch
   $('#p-interaction ul').append(`
     <li id="ca-nstab-rkj">
@@ -311,14 +335,19 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
   // Toggle switch click handler
   $('#togol-rkj').click(function () {
     const $content = $('#mw-content-text');
+    const $title = $('#firstHeading');
     if (this.checked) {
       cache = cache || $content.html();
+      titleCache = titleCache || $title.html();
       initRumiJawi();
+      processTitle();
       processContent($content);
       $content.attr({ dir: 'rtl', class: 'mw-content-rtl' });
-    } else if (cache) {
+    } else if (cache && titleCache) {
       $content.html(cache).attr({ dir: 'ltr', class: 'mw-content-ltr' });
+      $title.html(titleCache);
       cache = null;
+      titleCache = null;
     }
   });
 
