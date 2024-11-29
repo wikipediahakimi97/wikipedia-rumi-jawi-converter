@@ -1319,7 +1319,7 @@ kamus = {
 "bukau":"B0W0K0A1W0",
 "bukit":"B0W0K0Y0T0",
 "bukti":"B0W0Q0T0Y0",
-"buku":"B0W0K0W0",
+"buku":"B0W0K0W0", "buku-buku":"B0W0K0W0D4",
 "bulan":"B0W0L0N0","bulanan":"B0W0L0N0N0",
 "bulat":"B0W0L0T0",
 "bulatan":"B0W0L0T0N0",
