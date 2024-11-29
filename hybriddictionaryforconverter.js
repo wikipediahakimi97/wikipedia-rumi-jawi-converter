@@ -4156,7 +4156,7 @@ kamus = {
 "tahlil":"T0H0L0Y0L0",
 "talkin":"T0L0Q0Y0N0",
 "tahniah":"T0H0N0Y0Y4H0",
-"tahu":"T0A1H0W0",
+"tahu":"T0A1H0W0", "tahuan":"T0A1H0W0A1N0",
 "tahun":"T0A1H0W0N0",
 "tahunan":"T0A1H0W0N0N0",
 "taib":"T3Y0B0",
