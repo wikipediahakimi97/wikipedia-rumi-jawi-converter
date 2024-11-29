@@ -68,7 +68,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     'Z1': 'ظ', 'A2': 'ع', 'G1': 'غ', 'N2': 'ڠ', 'F0': 'ف', 'P0': 'ڤ',
     'Q0': 'ق', 'K0': 'ک', 'G0': 'ݢ', 'L0': 'ل', 'M0': 'م', 'N0': 'ن',
     'N1': 'ڽ', 'W0': 'و', 'V0': 'ۏ', 'H0': 'ه', 'T1': 'ة', 'Y0': 'ي',
-    'E0': 'ى', 'A4': 'أ', 'I4': 'إ', 'Y4': 'ئ', 'W4': 'ؤ',
+    'E0': 'ى', 'A4': 'أ', 'I4': 'إ', 'Y4': 'ئ', 'W4': 'ؤ', 'D4': '٢',
   };
 
   const punctuationsRumiToJawi = {
@@ -155,77 +155,96 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       .join('');
   };
 
-  const processWord = (word) => {
-	  if (RumiToCodePoint.entries[word]) {
-	    return convertCodePointsToJawi(RumiToCodePoint.entries[word]);
+	const processWord = (word) => {
+	  const lowerCaseWord = word.toLowerCase();
+	
+	  // Step 1: Match the root word in `kamus`
+	  const kamusMatch = Object.keys(RumiToCodePoint.entries)
+	    .sort((a, b) => b.length - a.length) // Sort by longest first
+	    .find((entry) => lowerCaseWord.includes(entry));
+	
+	  if (!kamusMatch) {
+	    // If no `kamus` match, fallback to default processing
+	    return fallbackProcessWord(word);
 	  }
 	
-	  let result = '';
-	  let start = 0;
+	  const rootStart = lowerCaseWord.indexOf(kamusMatch);
+	  const rootEnd = rootStart + kamusMatch.length;
 	
-	  while (start < word.length) {
-	    let matchedSubstring = null;
-	    let matchedJawi = null;
+	  // Split word into prefix, root, and suffix
+	  const prefixPart = lowerCaseWord.slice(0, rootStart);
+	  const suffixPart = lowerCaseWord.slice(rootEnd);
 	
-	    for (let end = word.length; end > start; end--) {
-	      const substring = word.slice(start, end).toLowerCase();
+	  let prefixCode = '';
+	  let suffixCode = '';
 	
-	      if (RumiToCodePoint.entries[substring]) {
-	        if (
-	          !matchedSubstring ||
-	          substring.length > matchedSubstring.length ||
-	          (substring.length === matchedSubstring.length && substring < matchedSubstring)
-	        ) {
-	          matchedSubstring = substring;
-	          matchedJawi = convertCodePointsToJawi(RumiToCodePoint.entries[substring]);
-	        }
-	      }
-	    }
+	  // Step 2: Process the prefix
+	  if (prefixPart) {
+	    const prefixMatch = Object.entries(RumiToCodePoint.prefixes)
+	      .sort((a, b) => b[0].length - a[0].length) // Longest prefix first
+	      .find(([prefix]) => prefixPart.endsWith(prefix));
 	
-	    if (matchedSubstring) {
-	      result += matchedJawi;
-	      start += matchedSubstring.length;
-	    } else {
-	      // Process remaining characters with prefix and suffix rules
-	      const remainingWord = word.slice(start).toLowerCase();
-	
-	      // Attempt to apply prefixes
-	      const prefixMatch = Object.entries(RumiToCodePoint.prefixes).find(([prefix]) =>
-	        remainingWord.startsWith(prefix)
-	      );
-	
-	      if (prefixMatch) {
-	        const [prefix, prefixCode] = prefixMatch;
-	        const strippedWord = remainingWord.slice(prefix.length);
-	        const baseCode = convertToCodePoints(strippedWord);
-	        const prefixedCode = prefixCode + baseCode;
-	        result += convertCodePointsToJawi(prefixedCode);
-	        break;
-	      }
-	
-	      // Attempt to apply suffixes
-	      const suffixMatch = Object.entries(RumiToCodePoint.suffixes).find(([suffix]) =>
-	        remainingWord.endsWith(suffix)
-	      );
-	
-	      if (suffixMatch) {
-	        const [suffix, suffixCode] = suffixMatch;
-	        const strippedWord = remainingWord.slice(0, -suffix.length);
-	        const baseCode = convertToCodePoints(strippedWord);
-	        const suffixedCode = baseCode + suffixCode;
-	        result += convertCodePointsToJawi(suffixedCode);
-	        break;
-	      }
-	
-	      // No match found, convert the remaining word character-by-character
-	      const transformedWord = convertToCodePoints(remainingWord);
-	      result += convertCodePointsToJawi(transformedWord);
-	      break;
+	    if (prefixMatch) {
+	      const [prefix, prefixMappedCode] = prefixMatch;
+	      prefixCode = prefixMappedCode;
 	    }
 	  }
 	
-	  return result;
+	  // Step 3: Process the suffix
+	  if (suffixPart) {
+	    const suffixMatch = Object.entries(RumiToCodePoint.suffixes)
+	      .sort((a, b) => b[0].length - a[0].length) // Longest suffix first
+	      .find(([suffix]) => suffixPart.startsWith(suffix));
+	
+	    if (suffixMatch) {
+	      const [suffix, suffixMappedCode] = suffixMatch;
+	      suffixCode = suffixMappedCode;
+	    }
+	  }
+	
+	  // If prefix or suffix is incomplete or failed to match, fallback to default processing
+	  if (!prefixCode && prefixPart || !suffixCode && suffixPart) {
+	    return fallbackProcessWord(word);
+	  }
+	
+	  // Step 4: Combine prefix, root word, and suffix
+	  const combinedCodepoints = prefixCode + RumiToCodePoint.entries[kamusMatch] + suffixCode;
+	
+	  // Convert the combined codepoints into Jawi letters
+	  return convertCodePointsToJawi(combinedCodepoints);
 	};
+	
+	const fallbackProcessWord = (word) => {
+	  const lowerCaseWord = word.toLowerCase(); // Rule (1): Convert all letters to lowercase
+	
+	  // Rule (2): Handle special cases for the first letter
+	  let fallbackCodepoints = '';
+	  const firstChar = lowerCaseWord[0];
+	  if (firstChar === 'i' || firstChar === 'e') {
+	    fallbackCodepoints += 'A1Y0';
+	  } else if (firstChar === 'o' || firstChar === 'u') {
+	    fallbackCodepoints += 'A1W0';
+	  } else {
+	    // Convert the first character if it's not a special case
+	    fallbackCodepoints += rumiToCodePoints[firstChar] || firstChar;
+	  }
+	
+	  // Process remaining characters after the first
+	  const remainingChars = lowerCaseWord.slice(1);
+	  const digraphRegex = new RegExp(Object.keys(digraphsToCodePoints).join('|'), 'gi');
+	  const parsedWithDigraphs = remainingChars.replace(digraphRegex, (match) => {
+	    return digraphsToCodePoints[match.toLowerCase()] || match;
+	  });
+	
+	  fallbackCodepoints += parsedWithDigraphs
+	    .split('')
+	    .map((char) => rumiToCodePoints[char] || char)
+	    .join('');
+	
+	  // Convert combined codepoints to Jawi letters
+	  return convertCodePointsToJawi(fallbackCodepoints);
+	};
+
 
 	const processText = (text) => {
 	  // Regex to detect numeric tokens
