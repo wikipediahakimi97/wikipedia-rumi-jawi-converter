@@ -2633,7 +2633,6 @@ kamus = {
 "lagi":"L0A1G0Y0", 
 "lagikan":"L0A1G0Y0K0N0",
 "lagu":"L0A1G0W0",
-"lah":"L0H0",
 "lahad":"L0H1D0",
 "lahan":"L0A1H0N0",
 "lahir":"L0A1H0Y0R0",
