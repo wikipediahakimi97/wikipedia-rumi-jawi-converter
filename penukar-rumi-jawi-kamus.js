@@ -65,22 +65,6 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
   let RumiJawi = null;
   const processedTextCache = {};
 
-  // CSS class for styling three-quarter Hamza
-  const hamzaCSSClass = 'three-quarter-hamza';
-
-  // Add CSS styles for three-quarter Hamza
-  const addHamzaCSS = () => {
-    const style = `
-      .${hamzaCSSClass} {
-        font-size: inherit;
-        vertical-align: super; /* Align Hamza to the height of an asterisk */
-        position: relative;
-        top: -0.2em; /* Fine-tune the position for better alignment */
-      }
-    `;
-    $('head').append(`<style>${style}</style>`);
-  };
-
   // Load the kamus data from GitHub
   const loadKamusData = () => {
     return fetch(
@@ -131,51 +115,8 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       result = processSuffixes(src);
     }
 
-    // Apply custom rule for three-quarter Hamza
-    result = processThreeQuarterHamza(result);
-
     processedTextCache[src] = result;
     return result;
-  };
-
-  // Custom rule: Process three-quarter Hamza
-  const processThreeQuarterHamza = (src) => {
-    const hamzaRegex = /؟ء؟/g;
-
-    // Use a placeholder to replace text content
-    if (!hamzaRegex.test(src)) return src;
-
-    // Return processed result with a placeholder for further DOM processing
-    return src.replace(hamzaRegex, '<!--hamza-->');
-  };
-
-  // Process and replace Hamza placeholders in DOM nodes
-  const replaceHamzaInDOM = (node) => {
-    if (node.nodeType === 3) {
-      // Replace placeholders in text nodes
-      const parent = node.parentNode;
-      const segments = node.textContent.split('<!--hamza-->');
-
-      if (segments.length > 1) {
-        segments.forEach((segment, i) => {
-          parent.insertBefore(document.createTextNode(segment), node);
-
-          // Insert a styled Hamza span element where the placeholder was found
-          if (i < segments.length - 1) {
-            const span = document.createElement('span');
-            span.className = hamzaCSSClass;
-            span.textContent = 'ء';
-            parent.insertBefore(span, node);
-          }
-        });
-
-        // Remove the original text node
-        parent.removeChild(node);
-      }
-    } else if (node.nodeType === 1) {
-      // Recursively process child nodes
-      Array.from(node.childNodes).forEach(replaceHamzaInDOM);
-    }
   };
 
   // Process suffixes
@@ -209,7 +150,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       ';': '⁏',
       '(': '(',
       ')': ')',
-      '-': 'ـ',
+      '-': ' ـ ',
       "'": '’',
       '"': '“',
       ' ': ' ',
@@ -238,17 +179,11 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
           text = processSuffixes(text);
           text = convertPunctuationToArabic(text);
 
-          // Apply custom rule for three-quarter Hamza
-          text = processThreeQuarterHamza(text);
-
           this.textContent = text;
         }
       } else {
         processContent($(this));
       }
-
-      // Handle Hamza placeholders
-      replaceHamzaInDOM(this);
     });
   };
 
@@ -268,10 +203,8 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 
       text = processSuffixes(text);
       text = convertPunctuationToArabic(text);
-      text = processThreeQuarterHamza(text);
 
       $title.text(text);
-      replaceHamzaInDOM($title[0]);
     }
   };
 
@@ -356,7 +289,6 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     Promise.all([loadKamusData()])
       .then(() => {
         console.log('Resources loaded successfully.');
-        addHamzaCSS();
       })
       .catch((error) => console.error('Error loading resources:', error));
   };
