@@ -99,7 +99,35 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     }
   };
 
-  const convertToJawi = async (src) => {
+  const fetchRumiJawiData = async () => {
+    const sparqlQuery = `
+      SELECT distinct ?f ?latn ?arab WHERE {
+        ?f dct:language wd:Q9237;
+           ontolex:lexicalForm ?form filter (lang(?latn) = "ms").
+        ?form ontolex:representation ?latn;
+           ontolex:representation ?arab filter (lang(?arab) = "ms-arab").
+      }
+    `;
+
+    const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
+    try {
+      const data = await queryDispatcher.query(sparqlQuery);
+      const rumiJawiMap = new Map();
+      
+      data.results.bindings.forEach(binding => {
+        const rumi = binding.latn.value.toLowerCase();
+        const jawi = binding.arab.value;
+        rumiJawiMap.set(rumi, jawi);
+      });
+      
+      return rumiJawiMap;
+    } catch (error) {
+      console.error('Error fetching Rumi-Jawi data:', error);
+      return new Map(); // Return empty map on error
+    }
+  };
+
+  const convertToJawi = async (src, rumiJawiMap) => {
     if (!src || typeof src !== 'string') return src;
     if (processedTextCache[src]) return processedTextCache[src];
 
@@ -115,15 +143,6 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       // Split text into words, numbers, punctuation, and existing whitespace
       const segments = protectedText.split(/(\s+|(?<=[.,!?:;()'"\-])|(?=[.,!?:;()'"\-]))/);
       const result = [];
-      
-      // Process complete words only
-      const words = segments.filter(segment => 
-        segment.trim() && // non-empty after trimming
-        WORD_TEST_REGEX.test(segment) && // only alphabetic
-        !NUMBER_REGEX.test(segment) // not numbers/percentages
-      );
-      
-      const wordToJawiMap = await processWordsToJawi(words);
       
       // Process each segment while preserving exact structure
       for (let segment of segments) {
@@ -141,9 +160,9 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
         } else if (NUMBER_REGEX.test(segment)) {
           // Keep numbers and percentages as-is
           result.push(segment);
-        } else if (wordToJawiMap[segment.toLowerCase()]) {
+        } else if (rumiJawiMap.has(segment.toLowerCase())) {
           // Convert complete words
-          result.push(wordToJawiMap[segment.toLowerCase()]);
+          result.push(rumiJawiMap.get(segment.toLowerCase()));
         } else {
           // Keep all other segments (including whitespace) exactly as they are
           result.push(segment);
@@ -179,7 +198,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       ';': '⁏',
       '(': '(',
       ')': ')',
-      '-': 'ـ',  // Removed spaces around tatweel
+      '-': '-', 
       '"': '"',
       "'": "'",
     };
@@ -192,6 +211,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 
   const processTitleAndContent = async () => {
     try {
+      const rumiJawiMap = await fetchRumiJawiData();
       const $title = $('#firstHeading');
       const $content = $('#mw-content-text');
 
@@ -201,7 +221,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
         if (node.nodeType === 3) { // Text node
           const text = node.textContent;
           if (text && text.trim()) {
-            const convertedText = await convertToJawi(text);
+            const convertedText = await convertToJawi(text, rumiJawiMap);
             if (convertedText !== text) {
               node.textContent = convertedText;
             }
