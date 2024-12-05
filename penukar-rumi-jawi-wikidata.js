@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 3rd December 2024
+ ** Updated on 5th December 2024
  **
  **/
 
@@ -67,46 +67,36 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     }
   }
 
-  // Optimized batch processing for words
-  const processBatch = async (words) => {
-    // If words array is empty, return immediately
+  // Optimized batch processing for words with concurrent execution
+  const processWordsToJawi = async (words) => {
     if (!words || words.length === 0) return {};
 
-    const BATCH_SIZE = 50; // Process 50 words at a time
-    const wordToJawiMap = {};
-
-    // Process words in batches of 50
-    for (let i = 0; i < words.length; i += BATCH_SIZE) {
-      const batch = words.slice(i, i + BATCH_SIZE);
-      const lowercaseWords = batch.map(word => word.toLowerCase());
-      
-      // Create SPARQL query with multiple entry points
-      const sparqlQuery = `
-        SELECT * {
-          VALUES ?latn { ${lowercaseWords.map(word => `"${word}"@ms`).join(' ')} }
-          ?f ontolex:representation ?latn;
-             ontolex:representation ?arab 
-          FILTER (LANG(?arab) = "ms-arab").
-        }
-      `;
-
-      const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
-      try {
-        const data = await queryDispatcher.query(sparqlQuery);
-        const bindings = data.results.bindings;
-
-        bindings.forEach(binding => {
-          const word = binding.latn.value.toLowerCase();
-          const jawi = binding.arab.value;
-          wordToJawiMap[word] = jawi;
-        });
-      } catch (error) {
-        console.error(`Error processing batch ${i / BATCH_SIZE + 1}:`, error);
-        // Continue with next batch despite error
+    const lowercaseWords = words.map(word => word.toLowerCase());
+    const sparqlQuery = `
+      SELECT distinct ?f ?latn ?arab WHERE {
+        ?f dct:language wd:Q9237;
+           ontolex:lexicalForm ?form filter (lang(?latn) = "ms").
+        ?form ontolex:representation ?latn;
+           ontolex:representation ?arab filter (lang(?arab) = "ms-arab").
       }
-    }
+    `;
 
-    return wordToJawiMap;
+    const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
+    try {
+      const data = await queryDispatcher.query(sparqlQuery);
+      const results = {};
+      
+      data.results.bindings.forEach(binding => {
+        const word = binding.latn.value.toLowerCase();
+        const jawi = binding.arab.value;
+        results[word] = jawi;
+      });
+      
+      return results;
+    } catch (error) {
+      console.error('Error converting words to Jawi:', error);
+      return {}; // Return empty object on error
+    }
   };
 
   const convertToJawi = async (src) => {
@@ -133,7 +123,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
         !NUMBER_REGEX.test(segment) // not numbers/percentages
       );
       
-      const wordToJawiMap = await processBatch(words);
+      const wordToJawiMap = await processWordsToJawi(words);
       
       // Process each segment while preserving exact structure
       for (let segment of segments) {
@@ -189,7 +179,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       ';': '⁏',
       '(': '(',
       ')': ')',
-      '-': '-',  // Removed spaces around tatweel
+      '-': 'ـ',  // Removed spaces around tatweel
       '"': '"',
       "'": "'",
     };
