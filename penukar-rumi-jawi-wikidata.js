@@ -1,10 +1,10 @@
 /**
  ** LOG:
- ** Updated on 5th December 2024
+ ** Updated on 9th January 2025
  **
  **/
 
-/* Change the text from rumi to jawi script */
+/* Convert the text from rumi to jawi script */
 
 /* Original author: [[Pengguna:Hakimi97]] */
 
@@ -19,244 +19,238 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
   let titleCache = null;
   let isInitialized = false;
   const processedTextCache = {};
-  const wordToJawiCache = new Map(); // Cache for individual word translations
-  const endpointUrl = 'https://query.wikidata.org/sparql';
-  const SPARQL_ENDPOINT = 'https://query.wikidata.org/sparql';
+  const endpointUrl = 'https://query-main.wikidata.org/sparql';
 
-  // Precompile regular expressions
-  const WORD_BOUNDARY_REGEX = /\b/;
-  const WORD_TEST_REGEX = /^[a-zA-Z]+$/; // Only alphabetic words
-  const NUMBER_REGEX = /^\d+([,.]\d+)*%?$/; // Matches numbers with optional decimal and percentage
-  const DECIMAL_PERCENT_REGEX = /\d+([,.]\d+)*%/; // Matches decimal numbers with percentage
-  const PUNCTUATION_REGEX = /[.,!?:;()'"\-]/g;
+  // Cache for SPARQL query results
+  let rumiJawiCache = null;
+  const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours in milliseconds
+  let lastFetchTime = 0;
 
   // Initialize the converter
-  const initRumiJawi = async () => {
-    if (isInitialized) return;
-    
-    try {
-      // Check if jQuery is loaded
-      if (typeof jQuery === 'undefined') {
-        throw new Error('jQuery is not loaded');
-      }
+  const initRumiJawi = () => {
+    if (isInitialized) return Promise.resolve();
 
-      // Check if mw.config is available
-      if (typeof mw === 'undefined' || !mw.config) {
-        throw new Error('MediaWiki configuration is not available');
-      }
+    return new Promise((resolve, reject) => {
+      try {
+        if (typeof jQuery === 'undefined') {
+          throw new Error('jQuery is not loaded');
+        }
 
-      isInitialized = true;
-      console.log('Rumi-Jawi converter initialized successfully');
-    } catch (error) {
-      console.error('Failed to initialize Rumi-Jawi converter:', error);
-      throw error;
-    }
+        if (typeof mw === 'undefined' || !mw.config) {
+          throw new Error('MediaWiki configuration is not available');
+        }
+
+        isInitialized = true;
+        console.log('Rumi-Jawi converter initialized successfully');
+        resolve();
+      } catch (error) {
+        console.error('Failed to initialize Rumi-Jawi converter:', error);
+        reject(error);
+      }
+    });
   };
 
-  // SPARQL Query Dispatcher class
+  // SPARQL Query Dispatcher with improved error handling
   class SPARQLQueryDispatcher {
-    constructor(endpoint) {
+    constructor(endpoint, options = {}) {
       this.endpoint = endpoint;
+      this.timeout = options.timeout || 10000; // Default to 10 seconds
+      this.maxRetries = options.maxRetries || 3;
+      this.backoffFactor = options.backoffFactor || 2; // For exponential backoff
     }
 
-    query(sparqlQuery) {
-      const fullUrl = this.endpoint + '?query=' + encodeURIComponent(sparqlQuery);
-      const headers = { 'Accept': 'application/sparql-results+json' };
+    query(sparqlQuery, retryCount = 0) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), this.timeout);
 
-      return fetch(fullUrl, { headers }).then(body => body.json());
+      const fullUrl = `${this.endpoint}?query=${encodeURIComponent(sparqlQuery)}`;
+      const headers = {
+        Accept: 'application/sparql-results+json',
+        'User-Agent': 'RumiJawiConverter/1.0',
+      };
+
+      return fetch(fullUrl, {
+        headers,
+        signal: controller.signal,
+        mode: 'cors',
+      })
+        .then((response) => {
+          clearTimeout(timeoutId);
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          return response.json();
+        })
+        .catch((error) => {
+          if (error.name === 'AbortError' && retryCount < this.maxRetries) {
+            console.log(`Retrying request (${retryCount + 1}/${this.maxRetries})`);
+            this.timeout *= this.backoffFactor; // Increase timeout for next retry
+            return this.query(sparqlQuery, retryCount + 1);
+          }
+          throw error;
+        });
     }
   }
 
-  // Optimized batch processing for words with concurrent execution
-  const processWordsToJawi = async (words) => {
-    if (!words || words.length === 0) return {};
+  // Fetch Rumi-Jawi mapping data
+  let fetchPromise = null;
 
-    const lowercaseWords = words.map(word => word.toLowerCase());
+  const fetchRumiJawiData = () => {
+    const now = Date.now();
+    if (rumiJawiCache && now - lastFetchTime < CACHE_DURATION) {
+      console.log('Using cached Rumi-Jawi data');
+      return Promise.resolve(rumiJawiCache);
+    }
+
+    if (fetchPromise) {
+      console.log('Waiting for ongoing fetch');
+      return fetchPromise;
+    }
+
     const sparqlQuery = `
-      SELECT distinct ?f ?latn ?arab WHERE {
+      SELECT DISTINCT ?form ?latn ?arab ?feature WHERE {
         ?f dct:language wd:Q9237;
-           ontolex:lexicalForm ?form filter (lang(?latn) = "ms").
+           ontolex:lexicalForm ?form FILTER (lang(?latn) = "ms").
         ?form ontolex:representation ?latn;
-           ontolex:representation ?arab filter (lang(?arab) = "ms-arab").
-      }
+           ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab").
+        OPTIONAL { ?form wikibase:grammaticalFeature ?feature }
+      } ORDER BY ?feature
     `;
 
     const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
-    try {
-      const data = await queryDispatcher.query(sparqlQuery);
-      const results = {};
-      
-      data.results.bindings.forEach(binding => {
-        const word = binding.latn.value.toLowerCase();
-        const jawi = binding.arab.value;
-        results[word] = jawi;
-      });
-      
-      return results;
-    } catch (error) {
-      console.error('Error converting words to Jawi:', error);
-      return {}; // Return empty object on error
-    }
-  };
 
-  const fetchRumiJawiData = async () => {
-    const sparqlQuery = `
-      SELECT distinct ?f ?latn ?arab WHERE {
-        ?f dct:language wd:Q9237;
-           ontolex:lexicalForm ?form filter (lang(?latn) = "ms").
-        ?form ontolex:representation ?latn;
-           ontolex:representation ?arab filter (lang(?arab) = "ms-arab").
-      }
-    `;
+    fetchPromise = queryDispatcher
+      .query(sparqlQuery)
+      .then((data) => {
+        const phrasesMap = new Map();
+        const pluralsMap = new Map();
+        const othersMap = new Map();
 
-    const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
-    try {
-      const data = await queryDispatcher.query(sparqlQuery);
-      const rumiJawiMap = new Map();
-      
-      data.results.bindings.forEach(binding => {
-        const rumi = binding.latn.value.toLowerCase();
-        const jawi = binding.arab.value;
-        rumiJawiMap.set(rumi, jawi);
-      });
-      
-      return rumiJawiMap;
-    } catch (error) {
-      console.error('Error fetching Rumi-Jawi data:', error);
-      return new Map(); // Return empty map on error
-    }
-  };
+        data.results.bindings.forEach(({ latn, arab, feature }) => {
+          const rumi = latn.value.toLowerCase();
+          const jawi = arab.value;
+          const featureValue = feature?.value;
 
-  const convertToJawi = async (src, rumiJawiMap) => {
-    if (!src || typeof src !== 'string') return src;
-    if (processedTextCache[src]) return processedTextCache[src];
-
-    try {
-      // First, protect decimal numbers with percentages
-      const protectedNumbers = new Map();
-      let protectedText = src.replace(DECIMAL_PERCENT_REGEX, match => {
-        const key = `__NUM${Math.random().toString(36).substr(2, 9)}__`;
-        protectedNumbers.set(key, match);
-        return key;
-      });
-
-      // Split text into words, numbers, punctuation, and existing whitespace
-      const segments = protectedText.split(/(\s+|(?<=[.,!?:;()'"\-])|(?=[.,!?:;()'"\-]))/);
-      const result = [];
-      
-      // Process each segment while preserving exact structure
-      for (let segment of segments) {
-        if (!segment) continue; // Skip empty segments
-        
-        // Check if this is a protected number
-        if (protectedNumbers.has(segment)) {
-          result.push(protectedNumbers.get(segment));
-          continue;
-        }
-        
-        if (PUNCTUATION_REGEX.test(segment)) {
-          // Convert punctuation without adding spaces
-          result.push(convertPunctuationToArabic(segment));
-        } else if (NUMBER_REGEX.test(segment)) {
-          // Keep numbers and percentages as-is
-          result.push(segment);
-        } else if (rumiJawiMap.has(segment.toLowerCase())) {
-          // Convert complete words
-          result.push(rumiJawiMap.get(segment.toLowerCase()));
-        } else {
-          // Keep all other segments (including whitespace) exactly as they are
-          result.push(segment);
-        }
-      }
-      
-      // Join all segments without adding any extra spaces
-      let finalText = result.join('');
-      
-      // Handle simple percentage numbers at the end without adding spaces
-      finalText = finalText.replace(/(\d+)(?![\d.])%(\s*)$/, '$2%$1');
-      
-      // Restore any remaining protected numbers
-      protectedNumbers.forEach((value, key) => {
-        finalText = finalText.replace(key, value);
-      });
-      
-      processedTextCache[src] = finalText;
-      return finalText;
-    } catch (error) {
-      console.error('Error in convertToJawi:', error);
-      return src;
-    }
-  };
-
-  const convertPunctuationToArabic = (() => {
-    const punctuationMap = {
-      '.': '.',
-      ',': '⹁',
-      '!': '!',
-      '?': '؟',
-      ':': ':',
-      ';': '⁏',
-      '(': '(',
-      ')': ')',
-      '-': '-', 
-      '"': '"',
-      "'": "'",
-    };
-
-    return (src) => {
-      if (!src) return src;
-      return src.replace(PUNCTUATION_REGEX, match => punctuationMap[match] || match);
-    };
-  })();
-
-  const processTitleAndContent = async () => {
-    try {
-      const rumiJawiMap = await fetchRumiJawiData();
-      const $title = $('#firstHeading');
-      const $content = $('#mw-content-text');
-
-      if (!$title.length || !$content.length) return;
-
-      const processTextNode = async (node, isTitle = false) => {
-        if (node.nodeType === 3) { // Text node
-          const text = node.textContent;
-          if (text && text.trim()) {
-            const convertedText = await convertToJawi(text, rumiJawiMap);
-            if (convertedText !== text) {
-              node.textContent = convertedText;
-            }
+          if (featureValue === 'http://www.wikidata.org/entity/Q187931') {
+            phrasesMap.set(rumi, jawi); // Phrases
+          } else if (featureValue === 'http://www.wikidata.org/entity/Q146786') {
+            pluralsMap.set(rumi, jawi); // Plurals
+          } else {
+            othersMap.set(rumi, jawi); // Other normal text
           }
-        } else if (node.nodeType === 1) { // Element node
-          // Skip certain elements and elements with numbers or percentages
-          const skipTags = ['script', 'style', 'code', 'pre'];
-          if (!skipTags.includes(node.tagName.toLowerCase())) {
-            // Check if the element contains only numbers or percentages
-            const elementText = node.textContent.trim();
-            if (!NUMBER_REGEX.test(elementText)) {
-              for (let child of node.childNodes) {
-                await processTextNode(child, isTitle);
-              }
-            }
+        });
+
+        rumiJawiCache = { phrasesMap, pluralsMap, othersMap };
+        lastFetchTime = now;
+        fetchPromise = null;
+
+        return rumiJawiCache;
+      })
+      .catch((error) => {
+        console.error('Error fetching Rumi-Jawi data:', error);
+        fetchPromise = null;
+        return (
+          rumiJawiCache || {
+            phrasesMap: new Map(),
+            pluralsMap: new Map(),
+            othersMap: new Map(),
+          }
+        );
+      });
+
+    return fetchPromise;
+  };
+
+  // Compile a prioritized regex map
+  const compileRegexMaps = (maps) => {
+    const compiledMaps = [];
+    for (const map of maps) {
+      const regexMap = new Map();
+      map.forEach((jawi, rumi) => {
+        regexMap.set(new RegExp(`(?<!\\w)${rumi}(?!\\w)`, 'gi'), jawi);
+      });
+      compiledMaps.push(regexMap);
+    }
+    return compiledMaps;
+  };
+
+  // Convert text to Jawi with strict priority handling
+  const convertToJawi = (src, { phrasesMap, pluralsMap, othersMap }) => {
+    if (!src || typeof src !== 'string') return Promise.resolve(src);
+    if (processedTextCache[src]) return Promise.resolve(processedTextCache[src]);
+
+    return new Promise((resolve, reject) => {
+      try {
+        let finalText = src;
+
+        const applyReplacements = (map) => {
+          map.forEach((jawi, rumi) => {
+            const regex = new RegExp(`(?<!\\w)${rumi}(?!\\w)`, 'gi');
+            finalText = finalText.replace(regex, jawi);
+          });
+        };
+
+        applyReplacements(phrasesMap);
+        applyReplacements(pluralsMap);
+        applyReplacements(othersMap);
+
+        processedTextCache[src] = finalText;
+        resolve(finalText);
+      } catch (error) {
+        console.error('Error in convertToJawi:', error);
+        reject(src);
+      }
+    });
+  };
+
+  // Process page title and content
+  const processTextNode = (node, maps) => {
+    const text = node.textContent;
+    if (text && text.trim()) {
+      return convertToJawi(text, maps).then((convertedText) => {
+        if (convertedText !== text) {
+          node.textContent = convertedText;
+
+          if (node.parentElement) {
+            node.parentElement.setAttribute('dir', 'auto');
           }
         }
-      };
-
-      // Process title and content nodes in parallel
-      await Promise.all([
-        processTextNode($title[0], true),
-        processTextNode($content[0], false)
-      ]);
-
-      // Set RTL direction only for content, not for title
-      $content.attr({
-        dir: 'rtl',
-        class: 'mw-content-rtl'
       });
-    } catch (error) {
-      console.error('Error in processTitleAndContent:', error);
     }
+    return Promise.resolve();
   };
 
+  const processTitleAndContent = () => {
+    return fetchRumiJawiData()
+      .then((maps) => {
+        const $title = $('#firstHeading');
+        const $content = $('#mw-content-text');
+
+        if (!$title.length || !$content.length) return;
+
+        const walker = document.createTreeWalker(
+          $content[0],
+          NodeFilter.SHOW_TEXT,
+          { acceptNode: () => NodeFilter.FILTER_ACCEPT }
+        );
+
+        const promises = [];
+        while (walker.nextNode()) {
+          promises.push(processTextNode(walker.currentNode, maps));
+        }
+
+        return Promise.all(promises).then(() => {
+          if ($title[0]) {
+            return processTextNode($title[0], maps);
+          }
+        });
+      })
+      .catch((error) => {
+        console.error('Error in processTitleAndContent:', error);
+      });
+  };
+
+  // Setup toggle switch
   const setupToggleSwitch = () => {
     try {
       const $interactionMenu = $('#p-interaction ul');
@@ -265,21 +259,29 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
         return;
       }
 
-      // Add toggle switch HTML
       $interactionMenu.append(`
         <li id="ca-nstab-rkj">
-          <span>
+          <span class="toggle-container">
+            <span id="toggle-label-left" class="toggle-label">Rumi</span>
             <label class="switch">
               <input id="togol-rkj" type="checkbox">
               <span class="slider round"></span>
             </label>
-            <a><label for="togol-rkj"> Papar dalam Jawi</label></a>
+            <span id="toggle-label-right" class="toggle-label">Jawi</span>
           </span>
         </li>
       `);
 
-      // Add CSS styles
       const toggleSwitchStyle = `
+        .toggle-container {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .toggle-label {
+          font-size: 14px;
+          user-select: none;
+        }
         .switch {
           position: relative;
           display: inline-block;
@@ -324,43 +326,54 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
           cursor: pointer;
         }
       `;
-      
       $('head').append(`<style>${toggleSwitchStyle}</style>`);
 
-      // Add toggle switch functionality
-      $('#togol-rkj').on('click', async function() {
-        try {
-          if (this.checked) {
-            if (!isInitialized) {
-              await initRumiJawi();
-            }
+      $('#togol-rkj').on('click', function () {
+        const mapsPromise = fetchRumiJawiData();
 
-            // Store original content
-            cache = cache || $('#mw-content-text').html();
-            titleCache = titleCache || $('#firstHeading').html();
+        if (this.checked) {
+          (isInitialized ? Promise.resolve() : initRumiJawi())
+            .then(() => {
+              $('html').attr('lang', 'ms-Arab').attr('dir', 'rtl');
 
-            // Process title and content
-            await processTitleAndContent();
-          } else {
-            // Restore original content
-            const $content = $('#mw-content-text');
-            const $title = $('#firstHeading');
-            
-            if (cache && titleCache) {
-              $content.html(cache).attr({
-                dir: 'ltr',
-                class: 'mw-content-ltr'
+              return mapsPromise.then((maps) => {
+                return convertToJawi('Jawi', maps).then((jawiLabel) => {
+                  $('#toggle-label-left').text(jawiLabel);
+                  return convertToJawi('Rumi', maps);
+                });
               });
-              $title.html(titleCache);
-              
-              // Clear cache
-              cache = null;
-              titleCache = null;
-            }
+            })
+            .then((rumiLabel) => {
+              $('#toggle-label-right').text(rumiLabel);
+
+              cache = cache || $('#mw-content-text').html();
+              titleCache = titleCache || $('#firstHeading').html();
+
+              return processTitleAndContent();
+            })
+            .catch((error) => {
+              console.error('Error toggling Rumi-Jawi converter:', error);
+              this.checked = false;
+            });
+        } else {
+          $('html').attr('lang', 'ms').attr('dir', 'ltr');
+
+          $('#toggle-label-left').text('Rumi');
+          $('#toggle-label-right').text('Jawi');
+
+          const $content = $('#mw-content-text');
+          const $title = $('#firstHeading');
+
+          if (cache && titleCache) {
+            $content.html(cache).attr({
+              dir: 'ltr',
+              class: 'mw-content-ltr',
+            });
+            $title.html(titleCache);
+
+            cache = null;
+            titleCache = null;
           }
-        } catch (error) {
-          console.error('Error toggling Rumi-Jawi converter:', error);
-          this.checked = !this.checked;
         }
       });
     } catch (error) {
@@ -368,18 +381,8 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     }
   };
 
-  const loadResources = async () => {
-    try {
-      await initRumiJawi();
-      console.log('Rumi-Jawi converter resources loaded successfully');
-    } catch (error) {
-      console.error('Error loading Rumi-Jawi converter resources:', error);
-    }
-  };
-
-  // Initialize the converter
   $(document).ready(() => {
     setupToggleSwitch();
-    loadResources();
+    initRumiJawi().catch((error) => console.error('Initialization failed:', error));
   });
 }
