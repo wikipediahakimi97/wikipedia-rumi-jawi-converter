@@ -108,13 +108,14 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     }
 
     const sparqlQuery = `
-      SELECT DISTINCT ?form ?latn ?arab ?feature WHERE {
-        ?f dct:language wd:Q9237;
-           ontolex:lexicalForm ?form FILTER (lang(?latn) = "ms").
-        ?form ontolex:representation ?latn;
-           ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab").
-        OPTIONAL { ?form wikibase:grammaticalFeature ?feature }
-      } ORDER BY ?feature
+		SELECT DISTINCT ?form ?latn ?arab ?feature WHERE {
+		  ?f dct:language wd:Q9237;
+		     ontolex:lexicalForm ?form FILTER (lang(?latn) = "ms").
+		  ?form ontolex:representation ?latn;
+		     ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab").
+		  OPTIONAL { ?form wikibase:grammaticalFeature ?feature }
+		  FILTER (!BOUND(?feature) || (?feature != wd:Q98912 && ?feature != wd:Q8185162))
+		} ORDER BY ?feature
     `;
 
     const queryDispatcher = new SPARQLQueryDispatcher(endpointUrl);
