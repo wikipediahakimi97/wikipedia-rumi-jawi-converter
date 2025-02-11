@@ -1,21 +1,5 @@
 /**
  ** LOG:
- ** Updated on 5th February 2025
- **
- **/
-
-/* Convert the text from rumi to jawi script */
-
-/* Original author: [[Pengguna:Hakimi97]] */
-
-/* Licensed under the terms of the GNU General Public License version 3.0
-* as published by the Free Software Foundation; See the
-* GNU General Public License for more details.
-* A copy of the GPL is available at https://www.gnu.org/licenses/gpl-3.0.txt 
-*/
-
-/**
- ** LOG:
  ** Updated on 10th Februari 2025
  **
  **/
