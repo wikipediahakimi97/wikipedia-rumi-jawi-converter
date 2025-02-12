@@ -151,7 +151,19 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 	    }).join('');
 	  };
 	
-	  // 3. Handle punctuation patterns
+	  // 3. Convert remaining single words
+	  const convertRemainingWords = (text) => {
+	    const segments = text.split(/(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/);
+	    return segments.map(segment => {
+	      if (!segment || /^\s+$/.test(segment) || /^[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`]$/.test(segment)) {
+	        return segment;
+	      }
+	      const lower = segment.toLowerCase().trim();
+	      return othersMap.get(lower) || segment;
+	    }).join('');
+	  };
+	
+	  // 4. Handle punctuation patterns - now runs last
 	  const handlePunctuationPatterns = (text) => {
 	    const punctuationPattern = /([.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`\-])/;
 	    const segments = text.split(/([\s\S])/);  // Split into individual characters
@@ -173,7 +185,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 	        const next = segments[i + 1];
 	        
 	        if (punctuationPattern.test(prev) && punctuationPattern.test(next)) {
-	          // Found a pattern - collect the word
+	          // Found a pattern - collect the word (which should already be converted)
 	          let word = current;
 	          let j = i + 2;
 	          while (j < segments.length && !punctuationPattern.test(segments[j]) && !/\s/.test(segments[j])) {
@@ -181,10 +193,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 	            j++;
 	          }
 	          
-	          // Convert the word if it's in othersMap
-	          const converted = othersMap.get(word.toLowerCase()) || word;
-	          processedSegments.push(converted);
-	          
+	          processedSegments.push(word);  // Word should already be converted
 	          i = j;
 	          continue;
 	        }
@@ -198,24 +207,12 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 	    return processedSegments.join('');
 	  };
 	
-	  // 4. Convert remaining single words
-	  const convertRemainingWords = (text) => {
-	    const segments = text.split(/(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`\-])/);
-	    return segments.map(segment => {
-	      if (!segment || /^\s+$/.test(segment) || /^[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`\-]$/.test(segment)) {
-	        return segment;
-	      }
-	      const lower = segment.toLowerCase().trim();
-	      return othersMap.get(lower) || segment;
-	    }).join('');
-	  };
-	
-	  // Apply conversions in the specified order
+	  // Apply conversions in the revised order
 	  let result = text;
 	  result = convertPhrases(result);
 	  result = convertPlurals(result);
-	  result = handlePunctuationPatterns(result);
 	  result = convertRemainingWords(result);
+	  result = handlePunctuationPatterns(result);
 	  
 	  return result;
 	};
