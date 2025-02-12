@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 10th Februari 2025
+ ** Updated on 11th Februari 2025
  **
  **/
 
@@ -84,69 +84,141 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
   };
 
   // Improved text conversion
-  const convertText = (text, maps) => {
-    if (!text) return text;
-    
-    const { phrasesMap, pluralsMap, othersMap } = maps;
-    const segments = text.split(/(\s+|[.,!?;()"]|\*\*)/);
-    const processedSegments = [];
-    let unmatchedBuffer = [];
-    
-    const tryConvertPhrase = (segments) => {
-      const phrase = segments.join('').toLowerCase().trim();
-      return phrasesMap.get(phrase) || null;
-    };
-
-    const processBuffer = () => {
-      if (unmatchedBuffer.length > 0) {
-        unmatchedBuffer.forEach(segment => {
-          const trimmed = segment.trim();
-          if (!trimmed) {
-            processedSegments.push(segment);
-            return;
-          }
-
-          const lower = trimmed.toLowerCase();
-          const converted = pluralsMap.get(lower) || 
-                          othersMap.get(lower) || 
-                          segment;
-          processedSegments.push(converted);
-        });
-        unmatchedBuffer = [];
-      }
-    };
-
-    segments.forEach((segment, index) => {
-      const trimmedSegment = segment.trim();
-      
-      if (!trimmedSegment || /^\s+$/.test(segment) || 
-          segment === '**' || /^[.,!?;()"]$/.test(segment)) {
-        processBuffer();
-        processedSegments.push(segment);
-        return;
-      }
-
-      unmatchedBuffer.push(segment);
-      
-      for (let len = Math.min(unmatchedBuffer.length, 5); len > 0; len--) {
-        const phraseSegments = unmatchedBuffer.slice(-len);
-        const converted = tryConvertPhrase(phraseSegments);
-        
-        if (converted) {
-          unmatchedBuffer.splice(-len);
-          processBuffer();
-          processedSegments.push(converted);
-          return;
-        }
-      }
-
-      if (unmatchedBuffer.length >= 5 || index === segments.length - 1) {
-        processBuffer();
-      }
-    });
-
-    return processedSegments.join('');
-  };
+	const convertText = (text, maps) => {
+	  if (!text) return text;
+	  
+	  const { phrasesMap, pluralsMap, othersMap } = maps;
+	  
+	  // 1. Convert phrases
+	  const convertPhrases = (text) => {
+	    const segments = text.split(/(\s+)/);
+	    const processedSegments = [];
+	    let unmatchedBuffer = [];
+	    
+	    const tryConvertPhrase = (segments) => {
+	      const phrase = segments.join('').toLowerCase().trim();
+	      return phrasesMap.get(phrase) || null;
+	    };
+	
+	    const processBuffer = () => {
+	      if (unmatchedBuffer.length > 0) {
+	        unmatchedBuffer.forEach(segment => {
+	          processedSegments.push(segment);
+	        });
+	        unmatchedBuffer = [];
+	      }
+	    };
+	
+	    segments.forEach((segment, index) => {
+	      if (!segment || /^\s+$/.test(segment)) {
+	        processBuffer();
+	        processedSegments.push(segment);
+	        return;
+	      }
+	
+	      unmatchedBuffer.push(segment);
+	      
+	      for (let len = Math.min(unmatchedBuffer.length, 5); len > 0; len--) {
+	        const phraseSegments = unmatchedBuffer.slice(-len);
+	        const converted = tryConvertPhrase(phraseSegments);
+	        
+	        if (converted) {
+	          unmatchedBuffer.splice(-len);
+	          processBuffer();
+	          processedSegments.push(converted);
+	          return;
+	        }
+	      }
+	
+	      if (unmatchedBuffer.length >= 5 || index === segments.length - 1) {
+	        processBuffer();
+	      }
+	    });
+	
+	    processBuffer();
+	    return processedSegments.join('');
+	  };
+	
+	  // 2. Convert plurals
+	  const convertPlurals = (text) => {
+	    const segments = text.split(/(\s+)/);
+	    return segments.map(segment => {
+	      if (!segment || /^\s+$/.test(segment)) {
+	        return segment;
+	      }
+	      const lower = segment.toLowerCase().trim();
+	      return pluralsMap.get(lower) || segment;
+	    }).join('');
+	  };
+	
+	  // 3. Handle punctuation patterns
+	  const handlePunctuationPatterns = (text) => {
+	    const punctuationPattern = /([.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`\-])/;
+	    const segments = text.split(/([\s\S])/);  // Split into individual characters
+	    const processedSegments = [];
+	    
+	    let i = 0;
+	    while (i < segments.length) {
+	      const current = segments[i];
+	      
+	      // Skip empty segments
+	      if (!current) {
+	        i++;
+	        continue;
+	      }
+	
+	      // Check for punctuation-word-punctuation pattern
+	      if (i > 0 && i < segments.length - 2) {
+	        const prev = segments[i - 1];
+	        const next = segments[i + 1];
+	        
+	        if (punctuationPattern.test(prev) && punctuationPattern.test(next)) {
+	          // Found a pattern - collect the word
+	          let word = current;
+	          let j = i + 2;
+	          while (j < segments.length && !punctuationPattern.test(segments[j]) && !/\s/.test(segments[j])) {
+	            word += segments[j];
+	            j++;
+	          }
+	          
+	          // Convert the word if it's in othersMap
+	          const converted = othersMap.get(word.toLowerCase()) || word;
+	          processedSegments.push(converted);
+	          
+	          i = j;
+	          continue;
+	        }
+	      }
+	      
+	      // No pattern match, keep the segment as is
+	      processedSegments.push(current);
+	      i++;
+	    }
+	    
+	    return processedSegments.join('');
+	  };
+	
+	  // 4. Convert remaining single words
+	  const convertRemainingWords = (text) => {
+	    const segments = text.split(/(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`\-])/);
+	    return segments.map(segment => {
+	      if (!segment || /^\s+$/.test(segment) || /^[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`\-]$/.test(segment)) {
+	        return segment;
+	      }
+	      const lower = segment.toLowerCase().trim();
+	      return othersMap.get(lower) || segment;
+	    }).join('');
+	  };
+	
+	  // Apply conversions in the specified order
+	  let result = text;
+	  result = convertPhrases(result);
+	  result = convertPlurals(result);
+	  result = handlePunctuationPatterns(result);
+	  result = convertRemainingWords(result);
+	  
+	  return result;
+	};
 
 	// Modified processTextNodes function
 	const processTextNodes = (element, maps, callback) => {
