@@ -85,80 +85,127 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 	  
 	  const { phrasesMap, othersMap } = maps;
 	  
-	  // Pre-compile regular expressions
-	  const whitespaceRegex = /^\s+$/;
-	  const wordSplitRegex = /(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/;
+	  // Pre-compile all regular expressions once
+	  const REGEX = {
+	    whitespace: /^\s+$/,
+	    wordSplit: /(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/,
+	    escape: /[.*+?^${}()|[\]\\]/g,
+	    kePrefix: /(^|\s)ک\s+(\S)/g,
+	    diPrefix: /(^|\s)د\s+(\S)/g,
+	    latinWord: /^[a-zA-Z]+$/,
+	    digit: /\d/,
+	  };
+	
+	  // Cache arrays and maps for frequent lookups
+	  const phraseValues = Array.from(phrasesMap.values());
+	  const sortedPhrases = Array.from(phrasesMap.entries())
+	    .sort(([a], [b]) => b.length - a.length);
 	  
-	  // 1. Convert phrases first
-	  const convertPhrases = (text) => {
-	    const sortedPhrases = Array.from(phrasesMap.entries())
-	      .sort(([a], [b]) => b.length - a.length);
-	    
-	    let result = text;
+	  const punctuationMap = new Map([
+	    [',', '⹁'],
+	    [';', '⁏'],
+	    ['?', '؟']
+	  ]);
+	
+	  // Memoization for frequently accessed operations
+	  const memoizedEscapedPhrases = new Map();
+	  const getEscapedPhrase = (phrase) => {
+	    if (!memoizedEscapedPhrases.has(phrase)) {
+	      memoizedEscapedPhrases.set(
+	        phrase,
+	        phrase.replace(REGEX.escape, '\\$&')
+	      );
+	    }
+	    return memoizedEscapedPhrases.get(phrase);
+	  };
+	
+	  // Optimized phrase conversion with memoized regex
+	  const convertPhrases = (input) => {
+	    let result = input;
 	    for (const [phrase, jawi] of sortedPhrases) {
-	      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	      const escapedPhrase = getEscapedPhrase(phrase);
 	      const phraseRegex = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
 	      result = result.replace(phraseRegex, jawi);
 	    }
 	    return result;
 	  };
-	  
-	  // 2. Convert remaining words, with special handling for hyphenated words
-	  const convertRemainingWords = (text) => {
-	    const segments = text.split(wordSplitRegex);
+	
+	  // Optimized word conversion with improved hyphenation handling
+	  const convertRemainingWords = (input) => {
+	    const segments = input.split(REGEX.wordSplit);
 	    return segments.map(segment => {
-	      if (!segment || whitespaceRegex.test(segment)) return segment;
+	      if (!segment || REGEX.whitespace.test(segment)) return segment;
 	      
 	      const lower = segment.toLowerCase().trim();
 	      
-	      // Skip if it's already been converted as a phrase
-	      if (Array.from(phrasesMap.values()).includes(segment)) {
-	        return segment;
-	      }
+	      if (phraseValues.includes(segment)) return segment;
 	      
-	      // For hyphenated words, try converting the complete word first
 	      if (segment.includes('-')) {
-	        // Try to convert the complete hyphenated word
 	        const completeConversion = othersMap.get(lower);
-	        if (completeConversion) {
-	          return completeConversion;
-	        }
+	        if (completeConversion) return completeConversion;
 	        
-	        // If complete conversion fails, handle individual parts
 	        return segment.split('-')
-	          .map(part => {
-	            const partLower = part.toLowerCase().trim();
-	            return othersMap.get(partLower) || part;
-	          })
+	          .map(part => othersMap.get(part.toLowerCase().trim()) || part)
 	          .join('-');
 	      }
 	      
-	      // Handle non-hyphenated words
 	      return othersMap.get(lower) || segment;
 	    }).join('');
 	  };
-
-	// This is for when ک (ke) and د (di) act as a word independently.
-		const applyNewRule = (text) => {
-		  // First handle ک cases
-		  let result = text.replace(/(^|\s)ک\s+(\S)/g, (match, p1, p2) => {
-		    const convertedWord = p2 === 'ا' ? 'أ' : p2;
-		    return `${p1}ک${convertedWord}`;
-		  });
-		  
-		  // Then handle د cases
-		  result = result.replace(/(^|\s)د\s+(\S)/g, (match, p1, p2) => {
-		    const convertedWord = p2 === 'ا' ? 'أ' : p2;
-		    return `${p1}د${convertedWord}`;
-		  });
-		  
-		  return result;
-		};
-
-	  // Apply conversions in sequence
-	  const convertedPhrases = convertPhrases(text);
-	  const convertedWords = convertRemainingWords(convertedPhrases);
-	  return applyNewRule(convertedWords);
+	
+	  // Optimized prefix rule application
+	  const applyPrefixRules = (input) => {
+	    const convertWord = char => char === 'ا' ? 'أ' : char;
+	    
+	    return input
+	      .replace(REGEX.kePrefix, (_, p1, p2) => `${p1}ک${convertWord(p2)}`)
+	      .replace(REGEX.diPrefix, (_, p1, p2) => `${p1}د${convertWord(p2)}`);
+	  };
+	
+	  // Optimized punctuation conversion with better position checking
+	  const convertPunctuation = (input) => {
+	    const isBetweenNumbers = (str, pos) => {
+	      return REGEX.digit.test(str[pos - 1]) && REGEX.digit.test(str[pos + 1]);
+	    };
+	
+	    const followsUnconvertedRumiWord = (str, pos) => {
+	      let wordStart = pos - 1;
+	      while (wordStart >= 0 && /[a-zA-Z]/.test(str[wordStart])) {
+	        wordStart--;
+	      }
+	      wordStart++;
+	
+	      if (wordStart < pos) {
+	        const word = str.slice(wordStart, pos).toLowerCase().trim();
+	        return word.length > 0 && 
+	               !othersMap.has(word) && 
+	               !phrasesMap.has(word) &&
+	               REGEX.latinWord.test(word);
+	      }
+	      return false;
+	    };
+	
+	    let result = input;
+	    for (const [latin, arabic] of punctuationMap) {
+	      const punctRegex = new RegExp(latin.replace(REGEX.escape, '\\$&'), 'g');
+	      result = result.replace(punctRegex, (match, offset) => {
+	        return (isBetweenNumbers(result, offset) || 
+	                followsUnconvertedRumiWord(result, offset))
+	          ? match
+	          : arabic;
+	      });
+	    }
+	    return result;
+	  };
+	
+	  // Apply optimized conversion pipeline
+	  return convertPunctuation(
+	    applyPrefixRules(
+	      convertRemainingWords(
+	        convertPhrases(text)
+	      )
+	    )
+	  );
 	};
 
   // Modified processTextNodes function
