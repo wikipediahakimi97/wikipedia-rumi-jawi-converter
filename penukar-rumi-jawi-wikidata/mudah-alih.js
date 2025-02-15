@@ -187,7 +187,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
             while (element && !element.classList.contains('mw-content-text')) {
               if (element.nodeType === 1 && 
                   !element.classList.contains('no-convert') &&
-                  element.closest('#mw-content-text')) {
+                  element.closest('#mw-content-text .mw-parser-output')) {
                 element.setAttribute('dir', 'rtl');
                 element.setAttribute('lang', 'ms-arab');
               }
@@ -233,7 +233,7 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 	        .attr('dir', 'ltr')
 	        .attr('lang', 'ms')
 	        // Only reset dir/lang on content elements
-	        .find('#mw-content-text [dir="rtl"]')
+	        .find('#mw-content-text .mw-parser-output [dir="rtl"]')
 	        .removeAttr('dir')
 	        .removeAttr('lang');
 	      CACHE.content = null;
@@ -591,8 +591,8 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 
   // Rest of the code remains the same
   $(document).ready(() => {
-    $contentElement = $('#mw-content-text').eq(0);
-    $titleElement = $('#firstHeading').eq(0);
+    $contentElement = $('#mw-content-text .mw-parser-output').eq(0);
+    $titleElement = $('.mw-first-heading').eq(0);
     
     if (!$contentElement.length || !$titleElement.length) {
       console.error('Content elements not found');
