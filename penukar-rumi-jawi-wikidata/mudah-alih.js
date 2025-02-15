@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 13th Februari 2025
+ ** Updated on 15th Februari 2025
  **
  **/
 
@@ -55,7 +55,6 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
   const processFetchedData = (data) => {
     const maps = {
       phrasesMap: new Map(),
-      pluralsMap: new Map(),
       othersMap: new Map()
     };
 
@@ -72,8 +71,6 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
       rumiVariants.forEach(variant => {
         if (feature?.value === 'http://www.wikidata.org/entity/Q187931') {
           maps.phrasesMap.set(variant, jawi);
-        } else if (feature?.value === 'http://www.wikidata.org/entity/Q146786') {
-          maps.pluralsMap.set(variant, jawi);
         } else {
           maps.othersMap.set(variant, jawi);
         }
@@ -83,214 +80,128 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     return maps;
   };
 
-	const convertText = (text, maps) => {
-	  if (!text) return text;
-	  
-	  const { phrasesMap, pluralsMap, othersMap } = maps;
-	  
-	  // Pre-compile regular expressions
-	  const whitespaceRegex = /^\s+$/;
-	  const punctuationRegex = /^[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`]$/;
-	  const segmentSplitRegex = /(\s+)/;
-	  const wordPunctSplitRegex = /(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/;
-	  
-	  // 1. Convert phrases - Optimized with a more efficient buffer handling
-	  const convertPhrases = (text) => {
-	    const segments = text.split(segmentSplitRegex);
-	    const processedSegments = [];
-	    const maxPhraseLength = 5;
-	    let unmatchedBuffer = [];
-	    
-	    const tryConvertPhrase = (segments) => 
-	      phrasesMap.get(segments.join('').toLowerCase().trim()) || null;
-	
-	    const processBuffer = () => {
-	      processedSegments.push(...unmatchedBuffer);
-	      unmatchedBuffer = [];
-	    };
-	
-	    for (let i = 0; i < segments.length; i++) {
-	      const segment = segments[i];
-	      
-	      if (!segment || whitespaceRegex.test(segment)) {
-	        processBuffer();
-	        processedSegments.push(segment);
-	        continue;
-	      }
-	
-	      unmatchedBuffer.push(segment);
-	      
-	      // Try matching phrases of decreasing length
-	      for (let len = Math.min(unmatchedBuffer.length, maxPhraseLength); len > 0; len--) {
-	        const phraseSegments = unmatchedBuffer.slice(-len);
-	        const converted = tryConvertPhrase(phraseSegments);
-	        
-	        if (converted) {
-	          unmatchedBuffer.length -= len; // More efficient than splice
-	          processBuffer();
-	          processedSegments.push(converted);
-	          break;
-	        }
-	      }
-	
-	      if (unmatchedBuffer.length >= maxPhraseLength || i === segments.length - 1) {
-	        processBuffer();
-	      }
-	    }
-	
-	    return processedSegments.join('');
-	  };
-	
-	  // 2. Convert plurals - Optimized with Map lookup
-	  const convertPlurals = (text) => {
-	    const segments = text.split(segmentSplitRegex);
-	    const result = new Array(segments.length);
-	    
-	    for (let i = 0; i < segments.length; i++) {
-	      const segment = segments[i];
-	      if (!segment || whitespaceRegex.test(segment)) {
-	        result[i] = segment;
-	        continue;
-	      }
-	      const lower = segment.toLowerCase().trim();
-	      result[i] = pluralsMap.get(lower) || segment;
-	    }
-	    
-	    return result.join('');
-	  };
-	
-	  // 3. Convert remaining words - Optimized with single pass
-	  const convertRemainingWords = (text) => {
-	    const segments = text.split(wordPunctSplitRegex);
-	    const result = new Array(segments.length);
-	    
-	    for (let i = 0; i < segments.length; i++) {
-	      const segment = segments[i];
-	      if (!segment || whitespaceRegex.test(segment) || punctuationRegex.test(segment)) {
-	        result[i] = segment;
-	        continue;
-	      }
-	      const lower = segment.toLowerCase().trim();
-	      result[i] = othersMap.get(lower) || segment;
-	    }
-	    
-	    return result.join('');
-	  };
-	
-	  // 4. Handle punctuation patterns - Optimized with StringBuilder approach
-	  const handlePunctuationPatterns = (text) => {
-	    const chars = text.split('');
-	    const result = new Array(chars.length);
-	    let i = 0;
-	    
-	    while (i < chars.length) {
-	      const current = chars[i];
-	      
-	      if (!current) {
-	        i++;
-	        continue;
-	      }
-	
-	      // Check for punctuation-word-punctuation pattern
-	      if (i > 0 && i < chars.length - 2) {
-	        const prev = chars[i - 1];
-	        const next = chars[i + 1];
-	        
-	        if (punctuationRegex.test(prev) && punctuationRegex.test(next)) {
-	          // Build word
-	          let wordEnd = i + 2;
-	          while (
-	            wordEnd < chars.length && 
-	            !punctuationRegex.test(chars[wordEnd]) && 
-	            !whitespaceRegex.test(chars[wordEnd])
-	          ) {
-	            wordEnd++;
-	          }
-	          
-	          result[i] = chars.slice(i, wordEnd).join('');
-	          i = wordEnd;
-	          continue;
-	        }
-	      }
-	      
-	      result[i] = current;
-	      i++;
-	    }
-	    
-	    return result.join('');
-	  };
-	
-	  // Apply conversions in sequence
-	  return handlePunctuationPatterns(
-	    convertRemainingWords(
-	      convertPlurals(
-	        convertPhrases(text)
-	      )
-	    )
-	  );
-	};
+  const convertText = (text, maps) => {
+    if (!text) return text;
+    
+    const { phrasesMap, othersMap } = maps;
+    
+    // Pre-compile regular expressions
+    const whitespaceRegex = /^\s+$/;
+    const wordSplitRegex = /(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/;
+    
+    // 1. Convert phrases first
+    const convertPhrases = (text) => {
+      const sortedPhrases = Array.from(phrasesMap.entries())
+        .sort(([a], [b]) => b.length - a.length);
+      
+      let result = text;
+      for (const [phrase, jawi] of sortedPhrases) {
+        const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const phraseRegex = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
+        result = result.replace(phraseRegex, jawi);
+      }
+      return result;
+    };
+    
+    // 2. Convert remaining words, with special handling for hyphenated words
+    const convertRemainingWords = (text) => {
+      const segments = text.split(wordSplitRegex);
+      return segments.map(segment => {
+        if (!segment || whitespaceRegex.test(segment)) return segment;
+        
+        const lower = segment.toLowerCase().trim();
+        
+        // Skip if it's already been converted as a phrase
+        if (Array.from(phrasesMap.values()).includes(segment)) {
+          return segment;
+        }
+        
+        // For hyphenated words, try converting the complete word first
+        if (segment.includes('-')) {
+          // Try to convert the complete hyphenated word
+          const completeConversion = othersMap.get(lower);
+          if (completeConversion) {
+            return completeConversion;
+          }
+          
+          // If complete conversion fails, handle individual parts
+          return segment.split('-')
+            .map(part => {
+              const partLower = part.toLowerCase().trim();
+              return othersMap.get(partLower) || part;
+            })
+            .join('-');
+        }
+        
+        // Handle non-hyphenated words
+        return othersMap.get(lower) || segment;
+      }).join('');
+    };
+    
+    // Apply conversions in sequence
+    const convertedPhrases = convertPhrases(text);
+    return convertRemainingWords(convertedPhrases);
+  };
 
-	// Modified processTextNodes function
-	const processTextNodes = (element, maps, callback) => {
-	  const nodes = [];
-	  const walker = document.createTreeWalker(
-	    element,
-	    NodeFilter.SHOW_TEXT,
-	    {
-	      acceptNode: (node) => {
-	        const parent = node.parentElement;
-	        if (parent && (
-	          parent.tagName === 'SCRIPT' ||
-	          parent.tagName === 'STYLE' ||
-	          parent.classList.contains('no-convert') ||
-	          // Don't process UI elements
-	          parent.closest('#p-navigation') ||
-	          parent.closest('.mw-portlet') ||
-	          parent.closest('.vector-menu') ||
-	          parent.closest('.mw-header')
-	        )) {
-	          return NodeFilter.FILTER_REJECT;
-	        }
-	        return NodeFilter.FILTER_ACCEPT;
-	      }
-	    },
-	    false
-	  );
-	
-	  let node;
-	  while (node = walker.nextNode()) {
-	    if (node.textContent.trim()) {
-	      nodes.push(node);
-	    }
-	  }
-	
-	  for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
-	    const batch = nodes.slice(i, i + CONFIG.BATCH_SIZE);
-	    requestAnimationFrame(() => {
-	      batch.forEach(node => {
-	        const newText = convertText(node.textContent, maps);
-	        if (newText !== node.textContent) {
-	          node.textContent = newText;
-	          // Only set RTL on content containers
-	          let element = node.parentElement;
-	          while (element && !element.classList.contains('mw-content-text')) {
-	            if (element.nodeType === 1 && 
-	                !element.classList.contains('no-convert') &&
-	                element.closest('#mw-content-text')) { // Only affect content area
-	              element.setAttribute('dir', 'rtl');
-	              element.setAttribute('lang', 'ms-arab');
-	            }
-	            element = element.parentElement;
-	          }
-	        }
-	      });
-	      
-	      if (callback && i + CONFIG.BATCH_SIZE >= nodes.length) {
-	        callback();
-	      }
-	    });
-	  }
-	};
+  // Modified processTextNodes function
+  const processTextNodes = (element, maps, callback) => {
+    const nodes = [];
+    const walker = document.createTreeWalker(
+      element,
+      NodeFilter.SHOW_TEXT,
+      {
+        acceptNode: (node) => {
+          const parent = node.parentElement;
+          if (parent && (
+            parent.tagName === 'SCRIPT' ||
+            parent.tagName === 'STYLE' ||
+            parent.classList.contains('no-convert') ||
+            parent.closest('#p-navigation') ||
+            parent.closest('.mw-portlet') ||
+            parent.closest('.vector-menu') ||
+            parent.closest('.mw-header')
+          )) {
+            return NodeFilter.FILTER_REJECT;
+          }
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      },
+      false
+    );
+  
+    let node;
+    while (node = walker.nextNode()) {
+      if (node.textContent.trim()) {
+        nodes.push(node);
+      }
+    }
+  
+    for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
+      const batch = nodes.slice(i, i + CONFIG.BATCH_SIZE);
+      requestAnimationFrame(() => {
+        batch.forEach(node => {
+          const newText = convertText(node.textContent, maps);
+          if (newText !== node.textContent) {
+            node.textContent = newText;
+            let element = node.parentElement;
+            while (element && !element.classList.contains('mw-content-text')) {
+              if (element.nodeType === 1 && 
+                  !element.classList.contains('no-convert') &&
+                  element.closest('#mw-content-text')) {
+                element.setAttribute('dir', 'rtl');
+                element.setAttribute('lang', 'ms-arab');
+              }
+              element = element.parentElement;
+            }
+          }
+        });
+        
+        if (callback && i + CONFIG.BATCH_SIZE >= nodes.length) {
+          callback();
+        }
+      });
+    }
+  };
 	
 	// Modified applyConversion function
 	const applyConversion = (isJawi, maps) => {
@@ -568,14 +479,14 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
 	              <label class="cdx-radio__label">
 	                <input type="radio" class="cdx-radio__input" name="ui-language" value="rumi-ui">
 	                <span class="cdx-radio__icon"></span>
-	                <span class="cdx-radio__label-content convertible-text" data-rumi="ms-latn">ms-latn</span>
+	                <span class="cdx-radio__label-content" data-rumi="ms-latn">ms-latn</span>
 	              </label>
 	            </div>
 	            <div class="cdx-radio__content">
 	              <label class="cdx-radio__label">
 	                <input type="radio" class="cdx-radio__input" name="ui-language" value="jawi-ui">
 	                <span class="cdx-radio__icon"></span>
-	                <span class="cdx-radio__label-content convertible-text" data-rumi="ms-arab">ms-arab</span>
+	                <span class="cdx-radio__label-content" data-rumi="ms-arab">ms-arab</span>
 	              </label>
 	            </div>
 	          </div>
