@@ -14,7 +14,7 @@
 * A copy of the GPL is available at https://www.gnu.org/licenses/gpl-3.0.txt 
 */
 
-if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))) {
+if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))) {
   const CACHE = {
     content: null,
     title: null,
@@ -80,68 +80,86 @@ if ([0, 1, 3, 4, 5, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))
     return maps;
   };
 
-  const convertText = (text, maps) => {
-    if (!text) return text;
-    
-    const { phrasesMap, othersMap } = maps;
-    
-    // Pre-compile regular expressions
-    const whitespaceRegex = /^\s+$/;
-    const wordSplitRegex = /(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/;
-    
-    // 1. Convert phrases first
-    const convertPhrases = (text) => {
-      const sortedPhrases = Array.from(phrasesMap.entries())
-        .sort(([a], [b]) => b.length - a.length);
-      
-      let result = text;
-      for (const [phrase, jawi] of sortedPhrases) {
-        const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const phraseRegex = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
-        result = result.replace(phraseRegex, jawi);
-      }
-      return result;
-    };
-    
-    // 2. Convert remaining words, with special handling for hyphenated words
-    const convertRemainingWords = (text) => {
-      const segments = text.split(wordSplitRegex);
-      return segments.map(segment => {
-        if (!segment || whitespaceRegex.test(segment)) return segment;
-        
-        const lower = segment.toLowerCase().trim();
-        
-        // Skip if it's already been converted as a phrase
-        if (Array.from(phrasesMap.values()).includes(segment)) {
-          return segment;
-        }
-        
-        // For hyphenated words, try converting the complete word first
-        if (segment.includes('-')) {
-          // Try to convert the complete hyphenated word
-          const completeConversion = othersMap.get(lower);
-          if (completeConversion) {
-            return completeConversion;
-          }
-          
-          // If complete conversion fails, handle individual parts
-          return segment.split('-')
-            .map(part => {
-              const partLower = part.toLowerCase().trim();
-              return othersMap.get(partLower) || part;
-            })
-            .join('-');
-        }
-        
-        // Handle non-hyphenated words
-        return othersMap.get(lower) || segment;
-      }).join('');
-    };
-    
-    // Apply conversions in sequence
-    const convertedPhrases = convertPhrases(text);
-    return convertRemainingWords(convertedPhrases);
-  };
+	const convertText = (text, maps) => {
+	  if (!text) return text;
+	  
+	  const { phrasesMap, othersMap } = maps;
+	  
+	  // Pre-compile regular expressions
+	  const whitespaceRegex = /^\s+$/;
+	  const wordSplitRegex = /(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/;
+	  
+	  // 1. Convert phrases first
+	  const convertPhrases = (text) => {
+	    const sortedPhrases = Array.from(phrasesMap.entries())
+	      .sort(([a], [b]) => b.length - a.length);
+	    
+	    let result = text;
+	    for (const [phrase, jawi] of sortedPhrases) {
+	      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	      const phraseRegex = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
+	      result = result.replace(phraseRegex, jawi);
+	    }
+	    return result;
+	  };
+	  
+	  // 2. Convert remaining words, with special handling for hyphenated words
+	  const convertRemainingWords = (text) => {
+	    const segments = text.split(wordSplitRegex);
+	    return segments.map(segment => {
+	      if (!segment || whitespaceRegex.test(segment)) return segment;
+	      
+	      const lower = segment.toLowerCase().trim();
+	      
+	      // Skip if it's already been converted as a phrase
+	      if (Array.from(phrasesMap.values()).includes(segment)) {
+	        return segment;
+	      }
+	      
+	      // For hyphenated words, try converting the complete word first
+	      if (segment.includes('-')) {
+	        // Try to convert the complete hyphenated word
+	        const completeConversion = othersMap.get(lower);
+	        if (completeConversion) {
+	          return completeConversion;
+	        }
+	        
+	        // If complete conversion fails, handle individual parts
+	        return segment.split('-')
+	          .map(part => {
+	            const partLower = part.toLowerCase().trim();
+	            return othersMap.get(partLower) || part;
+	          })
+	          .join('-');
+	      }
+	      
+	      // Handle non-hyphenated words
+	      return othersMap.get(lower) || segment;
+	    }).join('');
+	  };
+
+	// This is for when ک (ke) and د (di) act as a word independently.
+	const applyNewRule = (text) => {
+	  // First handle ک cases
+	  let result = text.replace(/(^|\s)ک\s+(\S)/g, (match, p1, p2) => {
+	    const convertedWord = p2 === 'ا' ? 'أ' : p2;
+	    return `${p1}ک${convertedWord}`;
+	  });
+	  
+	  // Then handle د cases
+	  result = result.replace(/(^|\s)د\s+(\S)/g, (match, p1, p2) => {
+	    const convertedWord = p2 === 'ا' ? 'أ' : p2;
+	    return `${p1}د${convertedWord}`;
+	  });
+	  
+	  return result;
+	};
+	
+	  // Apply conversions in sequence
+	  const convertedPhrases = convertPhrases(text);
+	  const convertedWords = convertRemainingWords(convertedPhrases);
+	  return applyNewRule(convertedWords);
+	};
 
   // Modified processTextNodes function
   const processTextNodes = (element, maps, callback) => {
