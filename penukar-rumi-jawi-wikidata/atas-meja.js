@@ -139,22 +139,22 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 	  };
 
 	// This is for when ک (ke) and د (di) act as a word independently.
-	const applyNewRule = (text) => {
-	  // First handle ک cases
-	  let result = text.replace(/(^|\s)ک\s+(\S)/g, (match, p1, p2) => {
-	    const convertedWord = p2 === 'ا' ? 'أ' : p2;
-	    return `${p1}ک${convertedWord}`;
-	  });
-	  
-	  // Then handle د cases
-	  result = result.replace(/(^|\s)د\s+(\S)/g, (match, p1, p2) => {
-	    const convertedWord = p2 === 'ا' ? 'أ' : p2;
-	    return `${p1}د${convertedWord}`;
-	  });
-	  
-	  return result;
-	};
-	
+		const applyNewRule = (text) => {
+		  // First handle ک cases
+		  let result = text.replace(/(^|\s)ک\s+(\S)/g, (match, p1, p2) => {
+		    const convertedWord = p2 === 'ا' ? 'أ' : p2;
+		    return `${p1}ک${convertedWord}`;
+		  });
+		  
+		  // Then handle د cases
+		  result = result.replace(/(^|\s)د\s+(\S)/g, (match, p1, p2) => {
+		    const convertedWord = p2 === 'ا' ? 'أ' : p2;
+		    return `${p1}د${convertedWord}`;
+		  });
+		  
+		  return result;
+		};
+
 	  // Apply conversions in sequence
 	  const convertedPhrases = convertPhrases(text);
 	  const convertedWords = convertRemainingWords(convertedPhrases);
@@ -276,7 +276,7 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 
     if (fetchPromise) return fetchPromise;
 
-    const resultUrl = 'https://query-main.wikidata.org/sparql?query=SELECT%20DISTINCT%20%3Fform%20%3Flatn%20%3Farab%20%3Ffeature%20WHERE%20%7B%0A%20%20%3Ff%20dct%3Alanguage%20wd%3AQ9237%3B%0A%20%20%20%20%20ontolex%3AlexicalForm%20%3Fform%20FILTER%20(lang(%3Flatn)%20%3D%20%22ms%22).%0A%20%20%3Fform%20ontolex%3Arepresentation%20%3Flatn%3B%0A%20%20%20%20%20ontolex%3Arepresentation%20%3Farab%20FILTER%20(lang(%3Farab)%20%3D%20%22ms-arab%22).%0A%20%20OPTIONAL%20%7B%20%3Fform%20wikibase%3AgrammaticalFeature%20%3Ffeature%20%7D%0A%20%20FILTER%20(!BOUND(%3Ffeature)%20%7C%7C%20(%3Ffeature%20!%3D%20wd%3AQ98912%20%26%26%20%3Ffeature%20!%3D%20wd%3AQ8185162))%0A%7D%20ORDER%20BY%20%3Ffeature&format=json';
+    const resultUrl = 'https://query-main.wikidata.org/sparql?query=SELECT%20DISTINCT%20%3Fform%20%3Flatn%20%3Farab%20%3Ffeature%20WHERE%20%7B%0A%20%20%3Ff%20dct%3Alanguage%20wd%3AQ9237%3B%0A%20%20%20%20%20ontolex%3AlexicalForm%20%3Fform%20FILTER%20%28lang%28%3Flatn%29%20%3D%20"ms"%29.%0A%20%20%3Fform%20ontolex%3Arepresentation%20%3Flatn%3B%0A%20%20%20%20%20ontolex%3Arepresentation%20%3Farab%20FILTER%20%28lang%28%3Farab%29%20%3D%20"ms-arab"%29.%0A%20%20OPTIONAL%20%7B%20%3Fform%20wikibase%3AgrammaticalFeature%20%3Ffeature%20%7D%0A%20%20FILTER%20%28%21BOUND%28%3Ffeature%29%20%7C%7C%20%28%3Ffeature%20%21%3D%20wd%3AQ98912%20%26%26%20%3Ffeature%20%21%3D%20wd%3AQ8185162%20%26%26%20%3Ffeature%20%21%3D%20wd%3AQ10617810%29%29%0A%7D%20ORDER%20BY%20%3Ffeature&format=json';
 
     fetchPromise = fetch(resultUrl, {
       headers: {
