@@ -79,89 +79,149 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 
     return maps;
   };
-
-	const convertText = (text, maps) => {
+  
+const convertText = (text, maps) => {
 	  if (!text) return text;
 	  
 	  const { phrasesMap, othersMap } = maps;
 	  
-	  // Pre-compile regular expressions
-	  const whitespaceRegex = /^\s+$/;
-	  const wordSplitRegex = /(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/;
-	  
-	  // 1. Convert phrases first
-	  const convertPhrases = (text) => {
-	    const sortedPhrases = Array.from(phrasesMap.entries())
-	      .sort(([a], [b]) => b.length - a.length);
-	    
-	    let result = text;
-	    for (const [phrase, jawi] of sortedPhrases) {
-	      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	      const phraseRegex = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
-	      result = result.replace(phraseRegex, jawi);
+	  const REGEX = {
+	    // Match any number with optional brackets, commas, decimals, and percentage
+	    number: /([[\({]?)(\d+(?:[,.]\d+)*(?:\.\d+)?%?)([)\]}]?)/g,
+	    // Match brackets for validation
+	    openBrackets: /[\[({]/,
+	    closeBrackets: /[)\]}]/,
+	    // Match words with apostrophes
+	    wordWithApostrophe: /\b\w+'\b/g,
+	    // Prefix patterns maintained
+	    prefixes: {
+	      ke: /(^|\s)ک\s+(\S)/g,
+	      di: /(^|\s)د\s+(\S)/g
 	    }
-	    return result;
 	  };
-	  
-	  // 2. Convert remaining words, with special handling for hyphenated words
-	  const convertRemainingWords = (text) => {
-	    const segments = text.split(wordSplitRegex);
-	    return segments.map(segment => {
-	      if (!segment || whitespaceRegex.test(segment)) return segment;
-	      
-	      const lower = segment.toLowerCase().trim();
-	      
-	      // Skip if it's already been converted as a phrase
-	      if (Array.from(phrasesMap.values()).includes(segment)) {
+	
+	  const punctuationMap = new Map([
+	    [',', '⹁'],
+	    [';', '⁏'],
+	    ['?', '؟']
+	  ]);
+	
+	  const sortedPhrases = [...phrasesMap.entries()]
+	    .sort(([a], [b]) => b.length - a.length);
+	
+	  const bracketsMatch = (open, close) => {
+	    const pairs = {
+	      '[': ']',
+	      '(': ')',
+	      '{': '}'
+	    };
+	    return !open || !close || pairs[open] === close;
+	  };
+	
+	  const preserveNumbers = (text) => {
+	    const placeholders = [];
+	    let processedText = text;
+	
+	    processedText = processedText.replace(
+	      REGEX.number,
+	      (match, openBracket, number, closeBracket) => {
+	        if (bracketsMatch(openBracket, closeBracket)) {
+	          const placeholder = `__NUM${placeholders.length}__`;
+	          placeholders.push(match);
+	          return placeholder;
+	        }
+	        return match;
+	      }
+	    );
+	
+	    return { processedText, placeholders };
+	  };
+	
+	  const applyPrefixRules = (text) => {
+	    const convertAlef = char => char === 'ا' ? 'أ' : char;
+	    
+	    return Object.entries(REGEX.prefixes).reduce((result, [type, pattern]) => {
+	      const prefix = type === 'ke' ? 'ک' : 'د';
+	      return result.replace(pattern, (_, p1, p2) => 
+	        `${p1}${prefix}${convertAlef(p2)}`
+	      );
+	    }, text);
+	  };
+	
+	  // New function to handle word conversion with apostrophe priority
+	  const convertWords = (text) => {
+	    const segments = text.split(/(\s+|[.,!?;:()"'\[\]{}<>\/\\|@#$%^&*_+=~`])/);
+	    const processedSegments = [];
+	    
+	    // First pass: Convert words with apostrophes
+	    for (let i = 0; i < segments.length; i++) {
+	      const segment = segments[i];
+	      if (segment && segment.includes("'") && !segment.includes('__NUM')) {
+	        const withoutApostrophe = segment.slice(0, -1).toLowerCase().trim();
+	        const converted = othersMap.get(withoutApostrophe);
+	        processedSegments[i] = converted ? converted + "'" : segment;
+	      } else {
+	        processedSegments[i] = null; // Mark for second pass
+	      }
+	    }
+	
+	    // Second pass: Convert remaining words
+	    return segments.map((segment, i) => {
+	      // If already processed in first pass, use that result
+	      if (processedSegments[i] !== null) {
+	        return processedSegments[i];
+	      }
+	
+	      if (!segment || segment.includes('__NUM')) {
 	        return segment;
 	      }
+	
+	      const lower = segment.toLowerCase().trim();
 	      
-	      // For hyphenated words, try converting the complete word first
 	      if (segment.includes('-')) {
-	        // Try to convert the complete hyphenated word
-	        const completeConversion = othersMap.get(lower);
-	        if (completeConversion) {
-	          return completeConversion;
-	        }
+	        const fullWord = othersMap.get(lower);
+	        if (fullWord) return fullWord;
 	        
-	        // If complete conversion fails, handle individual parts
 	        return segment.split('-')
-	          .map(part => {
-	            const partLower = part.toLowerCase().trim();
-	            return othersMap.get(partLower) || part;
-	          })
+	          .map(part => othersMap.get(part.toLowerCase().trim()) || part)
 	          .join('-');
 	      }
 	      
-	      // Handle non-hyphenated words
 	      return othersMap.get(lower) || segment;
 	    }).join('');
 	  };
-
-	// This is for when ک (ke) and د (di) act as a word independently.
-	const applyNewRule = (text) => {
-	  // First handle ک cases
-	  let result = text.replace(/(^|\s)ک\s+(\S)/g, (match, p1, p2) => {
-	    const convertedWord = p2 === 'ا' ? 'أ' : p2;
-	    return `${p1}ک${convertedWord}`;
-	  });
-	  
-	  // Then handle د cases
-	  result = result.replace(/(^|\s)د\s+(\S)/g, (match, p1, p2) => {
-	    const convertedWord = p2 === 'ا' ? 'أ' : p2;
-	    return `${p1}د${convertedWord}`;
-	  });
-	  
-	  return result;
-	};
 	
-	  // Apply conversions in sequence
-	  const convertedPhrases = convertPhrases(text);
-	  const convertedWords = convertRemainingWords(convertedPhrases);
-	  return applyNewRule(convertedWords);
+	  const convertTextSegment = (text) => {
+	    // Convert phrases
+	    let result = sortedPhrases.reduce((current, [phrase, jawi]) => {
+	      const pattern = new RegExp(`\\b${phrase}\\b`, 'gi');
+	      return current.replace(pattern, jawi);
+	    }, text);
+	
+	    // Convert words with apostrophe priority
+	    result = convertWords(result);
+	
+	    // Apply prefix rules
+	    result = applyPrefixRules(result);
+	
+	    // Convert punctuation
+	    return result.replace(/[,;?]/g, match => 
+	      punctuationMap.get(match) || match
+	    );
+	  };
+	
+	  // Main execution
+	  const { processedText, placeholders } = preserveNumbers(text);
+	  const converted = convertTextSegment(processedText);
+	
+	  // Restore numbers
+	  return placeholders.reduce((result, number, index) => 
+	    result.replace(`__NUM${index}__`, number),
+	    converted
+	  );
 	};
 
-
+	
   // Modified processTextNodes function
   const processTextNodes = (element, maps, callback) => {
     const nodes = [];
