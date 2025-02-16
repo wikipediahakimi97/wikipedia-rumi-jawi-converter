@@ -80,132 +80,132 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
     return maps;
   };
   
-	const convertText = (text, maps) => {
-	  if (!text) return text;
-	  
-	  const { phrasesMap, othersMap } = maps;
-	  
-	  const REGEX = {
-	    number: /\d+(?:[,.]\d+)*(?:\.\d+)?%?/g,
-	    word: /\b\w+\b/g
-	  };
-	
-	  const punctuationMap = new Map([
-	    [',', '⹁'],
-	    [';', '⁏'],
-	    ['?', '؟']
-	  ]);
-	
-	  // Step 1: Preserve numbers
-	  const preserveNumbers = (text) => {
-	    const placeholders = [];
-	    let processedText = text;
-	
-	    processedText = processedText.replace(
-	      REGEX.number,
-	      (match) => {
-	        const wrappedNumber = `\u2066${match}\u2069`;
-	        const placeholder = `__NUM${placeholders.length}__`;
-	        placeholders.push(wrappedNumber);
-	        return placeholder;
-	      }
-	    );
-	
-	    return { processedText, placeholders };
-	  };
-	
-	  // Step 2: Convert phrases (sorted by length for proper matching)
-	  const convertPhrases = (text) => {
-	    const sortedPhrases = [...phrasesMap.entries()]
-	      .sort(([a], [b]) => b.length - a.length);
-	
-	    return sortedPhrases.reduce((current, [phrase, jawi]) => {
-	      const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	      const pattern = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
-	      return current.replace(pattern, jawi);
-	    }, text);
-	  };
-	
-	  // Step 3: Convert words with apostrophes (complete word matches only)
-	  const convertApostropheWords = (text) => {
-	    return text.replace(/\b\w+'\b/g, match => {
-	      const lower = match.toLowerCase();
-	      return othersMap.get(lower) || match;
-	    });
-	  };
-
-  // Step 4: Convert hyphenated words
-  const convertHyphenatedWords = (text) => {
-    return text.replace(/\b\w+(?:-\w+)+\b/g, match => {
-      // Try complete word conversion first
-      const lower = match.toLowerCase();
-      const completeConversion = othersMap.get(lower);
-      
-      if (completeConversion) {
-        return completeConversion;
-      }
-      
-      // If complete conversion fails, convert each part
-      const parts = match.split('-');
-      const convertedParts = parts.map(part => {
-        const partLower = part.toLowerCase();
-        return othersMap.get(partLower) || part;
-      });
-      return convertedParts.join('-');
-    });
-  };
-
-  // Step 5: Convert individual words
-  const convertIndividualWords = (text) => {
-    return text.replace(REGEX.word, match => {
-      const lower = match.toLowerCase();
-      return othersMap.get(lower) || match;
-    });
-  };
-
-  // Step 6: Apply prefix rules
-  const applyPrefixRules = (text) => {
-    const convertAlef = char => char === 'ا' ? 'أ' : char;
-    const prefixes = {
-      ke: /(^|\s)ک\s+(\S)/g,
-      di: /(^|\s)د\s+(\S)/g
-    };
+  const convertText = (text, maps) => {
+    if (!text) return text;
     
-    return Object.entries(prefixes).reduce((result, [type, pattern]) => {
-      const prefix = type === 'ke' ? 'ک' : 'د';
-      return result.replace(pattern, (_, p1, p2) => 
-        `${p1}${prefix}${convertAlef(p2)}`
+    const { phrasesMap, othersMap } = maps;
+    
+    const REGEX = {
+      number: /\d+(?:[,.]\d+)*(?:\.\d+)?%?/g,
+      word: /\b\w+\b/g
+    };
+  
+    const punctuationMap = new Map([
+      [',', '⹁'],
+      [';', '⁏'],
+      ['?', '؟']
+    ]);
+  
+    // Step 1: Preserve numbers
+    const preserveNumbers = (text) => {
+      const placeholders = [];
+      let processedText = text;
+  
+      processedText = processedText.replace(
+        REGEX.number,
+        (match) => {
+          const wrappedNumber = `\u2066${match}\u2069`;
+          const placeholder = `__NUM${placeholders.length}__`;
+          placeholders.push(wrappedNumber);
+          return placeholder;
+        }
       );
-    }, text);
-  };
+  
+      return { processedText, placeholders };
+    };
+  
+    // Step 2: Convert phrases (sorted by length for proper matching)
+    const convertPhrases = (text) => {
+      const sortedPhrases = [...phrasesMap.entries()]
+        .sort(([a], [b]) => b.length - a.length);
+  
+      return sortedPhrases.reduce((current, [phrase, jawi]) => {
+        const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
+        return current.replace(pattern, jawi);
+      }, text);
+    };
+  
+    // Step 3: Convert words with apostrophes (complete word matches only)
+    const convertApostropheWords = (text) => {
+      return text.replace(/\b\w+'\b/g, match => {
+        const lower = match.toLowerCase();
+        return othersMap.get(lower) || match;
+      });
+    };
 
-  // Step 7: Convert punctuation
-  const convertPunctuation = (text) => {
-    return text.replace(/[,;?]/g, match => 
-      punctuationMap.get(match) || match
+    // Step 4: Convert hyphenated words
+    const convertHyphenatedWords = (text) => {
+      return text.replace(/\b\w+(?:-\w+)+\b/g, match => {
+        // Try complete word conversion first
+        const lower = match.toLowerCase();
+        const completeConversion = othersMap.get(lower);
+        
+        if (completeConversion) {
+          return completeConversion;
+        }
+        
+        // If complete conversion fails, convert each part
+        const parts = match.split('-');
+        const convertedParts = parts.map(part => {
+          const partLower = part.toLowerCase();
+          return othersMap.get(partLower) || part;
+        });
+        return convertedParts.join('-');
+      });
+    };
+
+    // Step 5: Convert individual words
+    const convertIndividualWords = (text) => {
+      return text.replace(REGEX.word, match => {
+        const lower = match.toLowerCase();
+        return othersMap.get(lower) || match;
+      });
+    };
+
+    // Step 6: Apply prefix rules
+    const applyPrefixRules = (text) => {
+      const convertAlef = char => char === 'ا' ? 'أ' : char;
+      const prefixes = {
+        ke: /(^|\s)ک\s+(\S)/g,
+        di: /(^|\s)د\s+(\S)/g
+      };
+      
+      return Object.entries(prefixes).reduce((result, [type, pattern]) => {
+        const prefix = type === 'ke' ? 'ک' : 'د';
+        return result.replace(pattern, (_, p1, p2) => 
+          `${p1}${prefix}${convertAlef(p2)}`
+        );
+      }, text);
+    };
+
+    // Step 7: Convert punctuation
+    const convertPunctuation = (text) => {
+      return text.replace(/[,;?]/g, match => 
+        punctuationMap.get(match) || match
+      );
+    };
+
+    // Main execution with proper ordering
+    const { processedText, placeholders } = preserveNumbers(text);
+    
+    // Add RLM (Right-to-Left Mark) at the start to establish RTL context
+    let result = '\u200F';
+    
+    result += processedText;
+    result = convertPhrases(result);
+    result = convertApostropheWords(result);
+    result = convertHyphenatedWords(result);
+    result = convertIndividualWords(result);
+    result = applyPrefixRules(result);
+    result = convertPunctuation(result);
+
+    // Restore numbers
+    return placeholders.reduce((result, number, index) => 
+      result.replace(`__NUM${index}__`, number),
+      result
     );
   };
-
-  // Main execution with proper ordering
-  const { processedText, placeholders } = preserveNumbers(text);
-  
-  // Add RLM (Right-to-Left Mark) at the start to establish RTL context
-  let result = '\u200F';
-  
-  result += processedText;
-  result = convertPhrases(result);
-  result = convertApostropheWords(result);
-  result = convertHyphenatedWords(result);
-  result = convertIndividualWords(result);
-  result = applyPrefixRules(result);
-  result = convertPunctuation(result);
-
-  // Restore numbers
-  return placeholders.reduce((result, number, index) => 
-    result.replace(`__NUM${index}__`, number),
-    result
-  );
-};
 
   // Modified processTextNodes function
   const processTextNodes = (element, maps, callback) => {
@@ -266,52 +266,52 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
       });
     }
   };
-	
-	// Modified applyConversion function
-	const applyConversion = (isJawi, maps) => {
-	  if (isJawi) {
-	    CACHE.content = CACHE.content || $contentElement.html();
-	    CACHE.title = CACHE.title || $titleElement.text();
-	    
-	    // Only set RTL on content and title
-	    $contentElement
-	      .attr('dir', 'rtl')
-	      .attr('lang', 'ms-arab');
-	    
-	    $titleElement
-	      .attr('dir', 'rtl')
-	      .attr('lang', 'ms-arab');
-	    
-	    requestAnimationFrame(() => {
-	      processTextNodes($contentElement[0], maps, () => {
-	        if ($titleElement[0]) {
-	          const convertedTitle = convertText($titleElement.text(), maps);
-	          $titleElement.text(convertedTitle);
-	        }
-	      });
-	    });
-	  } else {
-	    if (CACHE.content) {
-	      $contentElement
-	        .html(CACHE.content)
-	        .attr('dir', 'ltr')
-	        .attr('lang', 'ms')
-	        // Only reset dir/lang on content elements
-	        .find('#mw-content-text .mw-parser-output [dir="rtl"]')
-	        .removeAttr('dir')
-	        .removeAttr('lang');
-	      CACHE.content = null;
-	    }
-	    
-	    if (CACHE.title) {
-	      $titleElement
-	        .text(CACHE.title)
-	        .attr('dir', 'ltr')
-	        .attr('lang', 'ms');
-	      CACHE.title = null;
-	    }
-	  }
-	};
+  
+  // Modified applyConversion function
+  const applyConversion = (isJawi, maps) => {
+    if (isJawi) {
+      CACHE.content = CACHE.content || $contentElement.html();
+      CACHE.title = CACHE.title || $titleElement.text();
+      
+      // Only set RTL on content and title
+      $contentElement
+        .attr('dir', 'rtl')
+        .attr('lang', 'ms-arab');
+      
+      $titleElement
+        .attr('dir', 'rtl')
+        .attr('lang', 'ms-arab');
+      
+      requestAnimationFrame(() => {
+        processTextNodes($contentElement[0], maps, () => {
+          if ($titleElement[0]) {
+            const convertedTitle = convertText($titleElement.text(), maps);
+            $titleElement.text(convertedTitle);
+          }
+        });
+      });
+    } else {
+      if (CACHE.content) {
+        $contentElement
+          .html(CACHE.content)
+          .attr('dir', 'ltr')
+          .attr('lang', 'ms')
+          // Only reset dir/lang on content elements
+          .find('#mw-content-text .mw-parser-output [dir="rtl"]')
+          .removeAttr('dir')
+          .removeAttr('lang');
+        CACHE.content = null;
+      }
+      
+      if (CACHE.title) {
+        $titleElement
+          .text(CACHE.title)
+          .attr('dir', 'ltr')
+          .attr('lang', 'ms');
+        CACHE.title = null;
+      }
+    }
+  };
 
   // Data fetching with improved error handling
   const fetchRumiJawiData = () => {
@@ -322,7 +322,7 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 
     if (fetchPromise) return fetchPromise;
 
-    const resultUrl = 'https://query-main.wikidata.org/sparql?query=SELECT%20DISTINCT%20%3Fform%20%3Flatn%20%3Farab%20%3Ffeature%20WHERE%20%7B%0A%20%20%3Ff%20dct%3Alanguage%20wd%3AQ9237%3B%0A%20%20%20%20%20ontolex%3AlexicalForm%20%3Fform%20FILTER%20(lang(%3Flatn)%20%3D%20%22ms%22).%0A%20%20%3Fform%20ontolex%3Arepresentation%20%3Flatn%3B%0A%20%20%20%20%20ontolex%3Arepresentation%20%3Farab%20FILTER%20(lang(%3Farab)%20%3D%20%22ms-arab%22).%0A%20%20OPTIONAL%20%7B%20%3Fform%20wikibase%3AgrammaticalFeature%20%3Ffeature%20%7D%0A%20%20FILTER%20(!BOUND(%3Ffeature)%20%7C%7C%20(%3Ffeature%20!%3D%20wd%3AQ98912%20%26%26%20%3Ffeature%20!%3D%20wd%3AQ8185162))%0A%7D%20ORDER%20BY%20%3Ffeature&format=json';
+    const resultUrl = 'https://query-main.wikidata.org/sparql?query=SELECT%20DISTINCT%20%3Fform%20%3Flatn%20%3Farab%20%3Ffeature%20WHERE%20%7B%0A%20%20%3Ff%20dct%3Alanguage%20wd%3AQ9237%3B%0A%20%20%20%20%20ontolex%3AlexicalForm%20%3Fform%20FILTER%20%28lang%28%3Flatn%29%20%3D%20"ms"%29.%0A%20%20%3Fform%20ontolex%3Arepresentation%20%3Flatn%3B%0A%20%20%20%20%20ontolex%3Arepresentation%20%3Farab%20FILTER%20%28lang%28%3Farab%29%20%3D%20"ms-arab"%29.%0A%20%20OPTIONAL%20%7B%20%3Fform%20wikibase%3AgrammaticalFeature%20%3Ffeature%20%7D%0A%20%20FILTER%20%28%21BOUND%28%3Ffeature%29%20%7C%7C%20%28%3Ffeature%20%21%3D%20wd%3AQ98912%20%26%26%20%3Ffeature%20%21%3D%20wd%3AQ8185162%20%26%26%20%3Ffeature%20%21%3D%20wd%3AQ10617810%29%29%0A%7D%20ORDER%20BY%20%3Ffeature&format=json';
 
     fetchPromise = fetch(resultUrl, {
       headers: {
