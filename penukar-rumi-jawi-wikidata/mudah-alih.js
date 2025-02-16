@@ -87,8 +87,6 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 	  
 	  const REGEX = {
 	    number: /\d+(?:[,.]\d+)*(?:\.\d+)?%?/g,
-	    wordWithApostrophe: /\b\w+'\b/g,
-	    hyphenated: /\b\w+(?:-\w+)+\b/g,
 	    word: /\b\w+\b/g
 	  };
 	
@@ -128,89 +126,87 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 	    }, text);
 	  };
 	
-	  // Step 3: Convert hyphenated words and words with apostrophes
-	  const convertCompoundWords = (text) => {
-	    // Handle hyphenated words
-	    let result = text.replace(REGEX.hyphenated, match => {
-	      // Try converting the complete word first
-	      const lower = match.toLowerCase();
-	      const completeConversion = othersMap.get(lower);
-	      
-	      if (completeConversion) {
-	        return completeConversion;
-	      }
-	      
-	      // If complete conversion fails, convert individual parts
-	      const parts = match.split('-');
-	      const convertedParts = parts.map(part => {
-	        const partLower = part.toLowerCase();
-	        return othersMap.get(partLower) || part;
-	      });
-	      
-	      return convertedParts.join('-');
-	    });
-	
-	    // Handle words with apostrophes
-	    result = result.replace(REGEX.wordWithApostrophe, match => {
-	      const withoutApostrophe = match.slice(0, -1).toLowerCase();
-	      const converted = othersMap.get(withoutApostrophe);
-	      return converted ? converted + "'" : match;
-	    });
-	
-	    return result;
-	  };
-	
-	  // Step 4: Convert individual words
-	  const convertIndividualWords = (text) => {
-	    return text.replace(REGEX.word, match => {
+	  // Step 3: Convert words with apostrophes (complete word matches only)
+	  const convertApostropheWords = (text) => {
+	    return text.replace(/\b\w+'\b/g, match => {
 	      const lower = match.toLowerCase();
 	      return othersMap.get(lower) || match;
 	    });
 	  };
-	
-	  // Step 5: Apply prefix rules
-	  const applyPrefixRules = (text) => {
-	    const convertAlef = char => char === 'ا' ? 'أ' : char;
-	    const prefixes = {
-	      ke: /(^|\s)ک\s+(\S)/g,
-	      di: /(^|\s)د\s+(\S)/g
-	    };
-	    
-	    return Object.entries(prefixes).reduce((result, [type, pattern]) => {
-	      const prefix = type === 'ke' ? 'ک' : 'د';
-	      return result.replace(pattern, (_, p1, p2) => 
-	        `${p1}${prefix}${convertAlef(p2)}`
-	      );
-	    }, text);
-	  };
-	
-	  // Step 6: Convert punctuation
-	  const convertPunctuation = (text) => {
-	    return text.replace(/[,;?]/g, match => 
-	      punctuationMap.get(match) || match
-	    );
-	  };
-	
-	  // Main execution with proper ordering
-	  const { processedText, placeholders } = preserveNumbers(text);
-	  
-	  // Add RLM (Right-to-Left Mark) at the start to establish RTL context
-	  let result = '\u200F';
-	  
-	  result += processedText;
-	  result = convertPhrases(result);
-	  result = convertCompoundWords(result);
-	  result = convertIndividualWords(result);
-	  result = applyPrefixRules(result);
-	  result = convertPunctuation(result);
-	
-	  // Restore numbers
-	  return placeholders.reduce((result, number, index) => 
-	    result.replace(`__NUM${index}__`, number),
-	    result
-	  );
-	};
-	
+
+  // Step 4: Convert hyphenated words
+  const convertHyphenatedWords = (text) => {
+    return text.replace(/\b\w+(?:-\w+)+\b/g, match => {
+      // Try complete word conversion first
+      const lower = match.toLowerCase();
+      const completeConversion = othersMap.get(lower);
+      
+      if (completeConversion) {
+        return completeConversion;
+      }
+      
+      // If complete conversion fails, convert each part
+      const parts = match.split('-');
+      const convertedParts = parts.map(part => {
+        const partLower = part.toLowerCase();
+        return othersMap.get(partLower) || part;
+      });
+      return convertedParts.join('-');
+    });
+  };
+
+  // Step 5: Convert individual words
+  const convertIndividualWords = (text) => {
+    return text.replace(REGEX.word, match => {
+      const lower = match.toLowerCase();
+      return othersMap.get(lower) || match;
+    });
+  };
+
+  // Step 6: Apply prefix rules
+  const applyPrefixRules = (text) => {
+    const convertAlef = char => char === 'ا' ? 'أ' : char;
+    const prefixes = {
+      ke: /(^|\s)ک\s+(\S)/g,
+      di: /(^|\s)د\s+(\S)/g
+    };
+    
+    return Object.entries(prefixes).reduce((result, [type, pattern]) => {
+      const prefix = type === 'ke' ? 'ک' : 'د';
+      return result.replace(pattern, (_, p1, p2) => 
+        `${p1}${prefix}${convertAlef(p2)}`
+      );
+    }, text);
+  };
+
+  // Step 7: Convert punctuation
+  const convertPunctuation = (text) => {
+    return text.replace(/[,;?]/g, match => 
+      punctuationMap.get(match) || match
+    );
+  };
+
+  // Main execution with proper ordering
+  const { processedText, placeholders } = preserveNumbers(text);
+  
+  // Add RLM (Right-to-Left Mark) at the start to establish RTL context
+  let result = '\u200F';
+  
+  result += processedText;
+  result = convertPhrases(result);
+  result = convertApostropheWords(result);
+  result = convertHyphenatedWords(result);
+  result = convertIndividualWords(result);
+  result = applyPrefixRules(result);
+  result = convertPunctuation(result);
+
+  // Restore numbers
+  return placeholders.reduce((result, number, index) => 
+    result.replace(`__NUM${index}__`, number),
+    result
+  );
+};
+
   // Modified processTextNodes function
   const processTextNodes = (element, maps, callback) => {
     const nodes = [];
