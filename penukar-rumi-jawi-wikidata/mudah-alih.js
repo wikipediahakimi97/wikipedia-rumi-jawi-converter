@@ -80,132 +80,125 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
     return maps;
   };
   
-  const convertText = (text, maps) => {
-    if (!text) return text;
-    
-    const { phrasesMap, othersMap } = maps;
-    
-    const REGEX = {
-      number: /\d+(?:[,.]\d+)*(?:\.\d+)?%?/g,
-      word: /\b\w+\b/g
-    };
-  
-    const punctuationMap = new Map([
-      [',', '⹁'],
-      [';', '⁏'],
-      ['?', '؟']
-    ]);
-  
-    // Step 1: Preserve numbers
-    const preserveNumbers = (text) => {
-      const placeholders = [];
-      let processedText = text;
-  
-      processedText = processedText.replace(
-        REGEX.number,
-        (match) => {
-          const wrappedNumber = `\u2066${match}\u2069`;
-          const placeholder = `__NUM${placeholders.length}__`;
-          placeholders.push(wrappedNumber);
-          return placeholder;
-        }
-      );
-  
-      return { processedText, placeholders };
-    };
-  
-    // Step 2: Convert phrases (sorted by length for proper matching)
-    const convertPhrases = (text) => {
-      const sortedPhrases = [...phrasesMap.entries()]
-        .sort(([a], [b]) => b.length - a.length);
-  
-      return sortedPhrases.reduce((current, [phrase, jawi]) => {
-        const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const pattern = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
-        return current.replace(pattern, jawi);
-      }, text);
-    };
-  
-    // Step 3: Convert words with apostrophes (complete word matches only)
-    const convertApostropheWords = (text) => {
-      return text.replace(/\b\w+'\b/g, match => {
-        const lower = match.toLowerCase();
-        return othersMap.get(lower) || match;
-      });
-    };
-
-    // Step 4: Convert hyphenated words
-    const convertHyphenatedWords = (text) => {
-      return text.replace(/\b\w+(?:-\w+)+\b/g, match => {
-        // Try complete word conversion first
-        const lower = match.toLowerCase();
-        const completeConversion = othersMap.get(lower);
-        
-        if (completeConversion) {
-          return completeConversion;
-        }
-        
-        // If complete conversion fails, convert each part
-        const parts = match.split('-');
-        const convertedParts = parts.map(part => {
-          const partLower = part.toLowerCase();
-          return othersMap.get(partLower) || part;
-        });
-        return convertedParts.join('-');
-      });
-    };
-
-    // Step 5: Convert individual words
-    const convertIndividualWords = (text) => {
-      return text.replace(REGEX.word, match => {
-        const lower = match.toLowerCase();
-        return othersMap.get(lower) || match;
-      });
-    };
-
-    // Step 6: Apply prefix rules
-    const applyPrefixRules = (text) => {
-      const convertAlef = char => char === 'ا' ? 'أ' : char;
-      const prefixes = {
-        ke: /(^|\s)ک\s+(\S)/g,
-        di: /(^|\s)د\s+(\S)/g
-      };
-      
-      return Object.entries(prefixes).reduce((result, [type, pattern]) => {
-        const prefix = type === 'ke' ? 'ک' : 'د';
-        return result.replace(pattern, (_, p1, p2) => 
-          `${p1}${prefix}${convertAlef(p2)}`
-        );
-      }, text);
-    };
-
-    // Step 7: Convert punctuation
-    const convertPunctuation = (text) => {
-      return text.replace(/[,;?]/g, match => 
-        punctuationMap.get(match) || match
-      );
-    };
-
-    // Main execution with proper ordering
-    const { processedText, placeholders } = preserveNumbers(text);
-    
-    // Add RLM (Right-to-Left Mark) at the start to establish RTL context
-    let result = '\u200F';
-    
-    result += processedText;
-    result = convertPhrases(result);
-    result = convertApostropheWords(result);
-    result = convertHyphenatedWords(result);
-    result = convertIndividualWords(result);
-    result = applyPrefixRules(result);
-    result = convertPunctuation(result);
-
-    // Restore numbers
-    return placeholders.reduce((result, number, index) => 
-      result.replace(`__NUM${index}__`, number),
-      result
-    );
-  };
+	const convertText = (text, maps) => {
+	  if (!text) return text;
+	  
+	  const { phrasesMap, othersMap } = maps;
+	  
+	  // Step 1: Preserve numbers with RTL markers
+	  const preserveNumbers = (text) => {
+	    const placeholders = [];
+	    return {
+	      processedText: text.replace(
+	        /\d+(?:[,.]\d+)*(?:\.\d+)?%?/g,
+	        (match) => {
+	          const wrappedNumber = `\u2066${match}\u2069`;
+	          const placeholder = `__NUM${placeholders.length}__`;
+	          placeholders.push(wrappedNumber);
+	          return placeholder;
+	        }
+	      ),
+	      placeholders
+	    };
+	  };
+	
+	  // Step 2: Convert phrases (longer phrases first)
+	  const convertPhrases = (text) => {
+	    return [...phrasesMap.entries()]
+	      .sort(([a], [b]) => b.length - a.length)
+	      .reduce((current, [phrase, jawi]) => {
+	        const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	        const pattern = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
+	        return current.replace(pattern, jawi);
+	      }, text);
+	  };
+	
+	  // Step 3: Convert words with apostrophes
+	  const convertApostropheWords = (text) => {
+	    return text.replace(/\b\w+'\b/g, match => {
+	      const lower = match.toLowerCase();
+	      return othersMap.get(lower) || match;
+	    });
+	  };
+	
+	  // Step 4: Convert hyphenated words
+	  const convertHyphenatedWords = (text) => {
+	    return text.replace(/\b\w+(?:-\w+)+\b/g, match => {
+	      const lower = match.toLowerCase();
+	      // Try complete conversion first
+	      const completeConversion = othersMap.get(lower);
+	      if (completeConversion) return completeConversion;
+	      
+	      // If complete conversion fails, convert individual parts
+	      return match.split('-')
+	        .map(part => othersMap.get(part.toLowerCase()) || part)
+	        .join('-');
+	    });
+	  };
+	
+	  // Step 5: Convert individual words
+	  const convertIndividualWords = (text) => {
+	    return text.replace(/\b\w+\b/g, match => {
+	      const lower = match.toLowerCase();
+	      return othersMap.get(lower) || match;
+	    });
+	  };
+	
+	  // Step 6: Apply prefix rules
+	  const applyPrefixRules = (text) => {
+	    // Handle multiple types of spaces including non-breaking spaces
+	    const spacePattern = /[\s\u00A0]+/g;
+	    
+	    // First handle ک cases with any type of spacing
+	    let result = text.replace(
+	      /(^|[\s\u00A0]+)ک[\s\u00A0]+(\S)/g,
+	      (match, p1, p2) => `${p1}ک${p2 === 'ا' ? 'أ' : p2}`
+	    );
+	    
+	    // Then handle د cases with any type of spacing
+	    result = result.replace(
+	      /(^|[\s\u00A0]+)د[\s\u00A0]+(\S)/g,
+	      (match, p1, p2) => `${p1}د${p2 === 'ا' ? 'أ' : p2}`
+	    );
+	    
+	    // Clean up any remaining multiple spaces
+	    return result.replace(spacePattern, ' ');
+	  };
+	
+	  // Step 7: Convert punctuation
+	  const punctuationMap = new Map([
+	    [',', '⹁'],
+	    [';', '⁏'],
+	    ['?', '؟']
+	  ]);
+	
+	  const convertPunctuation = (text) => {
+	    return text.replace(/[,;?]/g, match => 
+	      punctuationMap.get(match) || match
+	    );
+	  };
+	
+	  // Execute conversion steps in order
+	  const { processedText, placeholders } = preserveNumbers(text);
+	  
+	  // Add RLM (Right-to-Left Mark) at the start
+	  let result = '\u200F';
+	  
+	  // Apply conversion steps in sequence
+	  result += processedText;
+	  result = convertPhrases(result);
+	  result = convertApostropheWords(result);
+	  result = convertHyphenatedWords(result);
+	  result = convertIndividualWords(result);
+	  result = applyPrefixRules(result);
+	  result = convertPunctuation(result);
+	
+	  // Finally, restore preserved numbers
+	  return placeholders.reduce(
+	    (text, number, index) => text.replace(`__NUM${index}__`, number),
+	    result
+	  );
+	};
 
   // Modified processTextNodes function
   const processTextNodes = (element, maps, callback) => {
