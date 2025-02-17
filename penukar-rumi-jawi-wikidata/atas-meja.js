@@ -181,11 +181,8 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 	  // Execute conversion steps in order
 	  const { processedText, placeholders } = preserveNumbers(text);
 	  
-	  // Add RLM (Right-to-Left Mark) at the start
-	  let result = '\u200F';
-	  
-	  // Apply conversion steps in sequence
-	  result += processedText;
+	  // Apply conversion steps in sequence without adding RLM
+	  let result = processedText;
 	  result = convertPhrases(result);
 	  result = convertApostropheWords(result);
 	  result = convertHyphenatedWords(result);
