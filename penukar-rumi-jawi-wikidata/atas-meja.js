@@ -115,9 +115,9 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
 	
 	  // Step 3: Convert words with apostrophes
 	  const convertApostropheWords = (text) => {
-	    return text.replace(/\b\w+'\b/g, match => {
-	      const lower = match.toLowerCase();
-	      return othersMap.get(lower) || match;
+	    return text.replace(/\bʼ\w+\b|\b\w+'\w*\b|\b\w+'\b/g, match => {
+	  	  const lower = match.toLowerCase();
+	  	  return othersMap.get(lower) || match;
 	    });
 	  };
 	
