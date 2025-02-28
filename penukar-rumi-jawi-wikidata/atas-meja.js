@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 16th Februari 2025
+ ** Updated on 1st March 2025
  **
  **/
 
@@ -14,368 +14,329 @@
 * A copy of the GPL is available at https://www.gnu.org/licenses/gpl-3.0.txt 
 */
 
-if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNamespaceNumber'))) {
-  const CACHE = {
-    content: null,
-    title: null,
-    processedText: new Map(),
-    rumiJawi: null,
-    lastFetch: 0,
-    currentScript: 'rumi'
-  };
-  
-  const CONFIG = {
+(() => {
+  // Early exit for unsupported namespaces
+  const SUPPORTED_NAMESPACES = new Set([0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15]);
+  if (!SUPPORTED_NAMESPACES.has(mw.config.get('wgNamespaceNumber'))) return;
+
+  // Constants using Object.freeze for immutability
+  const CONFIG = Object.freeze({
     CACHE_DURATION: 24 * 60 * 60 * 1000,
     BATCH_SIZE: 100,
-    MAX_REGEX_CACHE: 1000
-  };
-
-  let isInitialized = false;
-  let fetchPromise = null;
-  let $contentElement = null;
-  let $titleElement = null;
-
-  // Regex cache with memory management
-  const REGEX_CACHE = new Map();
-  const getRegex = (word) => {
-    if (!REGEX_CACHE.has(word)) {
-      if (REGEX_CACHE.size >= CONFIG.MAX_REGEX_CACHE) {
-        const entries = Array.from(REGEX_CACHE.keys());
-        for (let i = 0; i < entries.length / 2; i++) {
-          REGEX_CACHE.delete(entries[i]);
-        }
+    MAX_REGEX_CACHE: 1000,
+    SPARQL_ENDPOINT: 'https://query-main.wikidata.org/sparql',
+    QUERY: `SELECT DISTINCT ?form ?latn ?arab (GROUP_CONCAT(DISTINCT ?featureLabel; SEPARATOR=", ") AS ?totalFeatureLabels) WHERE {
+      ?f dct:language wd:Q9237;
+         ontolex:lexicalForm ?form FILTER (lang(?latn) = "ms").
+      ?form ontolex:representation ?latn;
+         ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab").
+      OPTIONAL { 
+        ?form wikibase:grammaticalFeature ?feature .
+        ?feature rdfs:label ?featureLabel FILTER (lang(?featureLabel) = "en").
       }
-      const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      REGEX_CACHE.set(word, new RegExp(`\\b${escapedWord}\\b`, 'gi'));
-    }
-    return REGEX_CACHE.get(word);
+      FILTER (!BOUND(?feature) || (
+        ?feature != wd:Q98912 && 
+        ?feature != wd:Q8185162 && 
+        ?feature != wd:Q10617810
+      ))
+    } 
+    GROUP BY ?form ?latn ?arab`,
+    PUNCTUATION_MAP: { ',': '⹁', ';': '⁏', '?': '؟' }
+  });
+
+  // Simplified state object
+  const State = {
+    cache: {
+      content: null,
+      title: null,
+      processedText: new Map(),
+      rumiJawi: null,
+      lastFetch: 0,
+      currentScript: 'rumi'
+    },
+    elements: {
+      content: null,
+      title: null
+    },
+    regexCache: new WeakMap(),
+    nodeCacheStore: new WeakMap(),
+    isInitialized: false,
+    fetchPromise: null
   };
 
-  // Enhanced data processing
-  const processFetchedData = (data) => {
-    const maps = {
-      phrasesMap: new Map(),
-      othersMap: new Map()
-    };
+  // Cache for word-to-regex using string keys
+  const stringRegexCache = new Map();
 
-    data.results.bindings.forEach(({ latn, arab, feature }) => {
-      const rumi = latn.value.toLowerCase();
-      const jawi = arab.value;
-      
-      const rumiVariants = new Set([
-        rumi,
-        rumi.normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
-        rumi.charAt(0).toUpperCase() + rumi.slice(1)
-      ]);
+  const Utils = {
+    regexEscape: str => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'),
+    getRegex(word) {
+      if (!stringRegexCache.has(word)) {
+        if (stringRegexCache.size >= CONFIG.MAX_REGEX_CACHE) {
+          const keys = [...stringRegexCache.keys()];
+          keys.slice(0, Math.floor(keys.length / 2)).forEach(key => stringRegexCache.delete(key));
+        }
+        stringRegexCache.set(word, new RegExp(`\\b${this.regexEscape(word)}\\b`, 'gi'));
+      }
+      return stringRegexCache.get(word);
+    },
+    createRumiVariants: rumi => new Set([
+      rumi,
+      rumi.normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+      rumi.charAt(0).toUpperCase() + rumi.slice(1)
+    ])
+  };
 
-      rumiVariants.forEach(variant => {
-        if (feature?.value === 'http://www.wikidata.org/entity/Q187931') {
-          maps.phrasesMap.set(variant, jawi);
+  const TextConverter = {
+    processFetchedData(data) {
+      const maps = {
+        phrasesMap: new Map(),
+        wordsMap: new Map()
+      };
+
+      data.results.bindings.forEach(({ latn, arab }) => {
+        const rumi = latn.value.toLowerCase();
+        const jawi = arab.value;
+        if (rumi.includes(' ')) {
+          Utils.createRumiVariants(rumi).forEach(variant => maps.phrasesMap.set(variant, jawi));
         } else {
-          maps.othersMap.set(variant, jawi);
+          Utils.createRumiVariants(rumi).forEach(variant => maps.wordsMap.set(variant, jawi));
         }
       });
-    });
+      return maps;
+    },
 
-    return maps;
-  };
-  
-	const convertText = (text, maps) => {
-	  if (!text) return text;
-	  
-	  const { phrasesMap, othersMap } = maps;
-	  
-	  // Step 1: Preserve numbers with RTL markers
-	  const preserveNumbers = (text) => {
-	    const placeholders = [];
-	    return {
-	      processedText: text.replace(
-	        /\d+(?:[,.]\d+)*(?:\.\d+)?%?/g,
-	        (match) => {
-	          const wrappedNumber = `\u2066${match}\u2069`;
-	          const placeholder = `__NUM${placeholders.length}__`;
-	          placeholders.push(wrappedNumber);
-	          return placeholder;
-	        }
-	      ),
-	      placeholders
-	    };
-	  };
-	
-	  // Step 2: Convert phrases (longer phrases first)
-	  const convertPhrases = (text) => {
-	    return [...phrasesMap.entries()]
-	      .sort(([a], [b]) => b.length - a.length)
-	      .reduce((current, [phrase, jawi]) => {
-	        const escapedPhrase = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-	        const pattern = new RegExp(`\\b${escapedPhrase}\\b`, 'gi');
-	        return current.replace(pattern, jawi);
-	      }, text);
-	  };
-	
-	  // Step 3: Convert words with apostrophes
-	  const convertApostropheWords = (text) => {
-	    return text.replace(/\bʼ\w+\b|\b\w+'\w*\b|\b\w+'\b/g, match => {
-	  	  const lower = match.toLowerCase();
-	  	  return othersMap.get(lower) || match;
-	    });
-	  };
-	
-	  // Step 4: Convert hyphenated words
-	  const convertHyphenatedWords = (text) => {
-	    return text.replace(/\b\w+(?:-\w+)+\b/g, match => {
-	      const lower = match.toLowerCase();
-	      // Try complete conversion first
-	      const completeConversion = othersMap.get(lower);
-	      if (completeConversion) return completeConversion;
-	      
-	      // If complete conversion fails, convert individual parts
-	      return match.split('-')
-	        .map(part => othersMap.get(part.toLowerCase()) || part)
-	        .join('-');
-	    });
-	  };
-	
-	  // Step 5: Convert individual words
-	  const convertIndividualWords = (text) => {
-	    return text.replace(/\b\w+\b/g, match => {
-	      const lower = match.toLowerCase();
-	      return othersMap.get(lower) || match;
-	    });
-	  };
-	
-	  // Step 6: Apply prefix rules
-	  const applyPrefixRules = (text) => {
-	    // Handle multiple types of spaces including non-breaking spaces
-	    const spacePattern = /[\s\u00A0]+/g;
-	    
-	    // First handle ک cases with any type of spacing
-	    let result = text.replace(
-	      /(^|[\s\u00A0]+)ک[\s\u00A0]+(\S)/g,
-	      (match, p1, p2) => `${p1}ک${p2 === 'ا' ? 'أ' : p2}`
-	    );
-	    
-	    // Then handle د cases with any type of spacing
-	    result = result.replace(
-	      /(^|[\s\u00A0]+)د[\s\u00A0]+(\S)/g,
-	      (match, p1, p2) => `${p1}د${p2 === 'ا' ? 'أ' : p2}`
-	    );
-	    
-	    // Clean up any remaining multiple spaces
-	    return result.replace(spacePattern, ' ');
-	  };
-	
-	  // Step 7: Convert punctuation
-	  const punctuationMap = new Map([
-	    [',', '⹁'],
-	    [';', '⁏'],
-	    ['?', '؟']
-	  ]);
-	
-	  const convertPunctuation = (text) => {
-	    return text.replace(/[,;?]/g, match => 
-	      punctuationMap.get(match) || match
-	    );
-	  };
-	
-	  // Execute conversion steps in order
-	  const { processedText, placeholders } = preserveNumbers(text);
-	  
-	  // Apply conversion steps in sequence without adding RLM
-	  let result = processedText;
-	  result = convertPhrases(result);
-	  result = convertApostropheWords(result);
-	  result = convertHyphenatedWords(result);
-	  result = convertIndividualWords(result);
-	  result = applyPrefixRules(result);
-	  result = convertPunctuation(result);
-	
-	  // Finally, restore preserved numbers
-	  return placeholders.reduce(
-	    (text, number, index) => text.replace(`__NUM${index}__`, number),
-	    result
-	  );
-	};
+    convertText(text, maps) {
+      if (!text?.trim()) return text;
+      
+      const cacheKey = `${text}-${State.cache.currentScript}`;
+      if (State.cache.processedText.has(cacheKey)) {
+        return State.cache.processedText.get(cacheKey);
+      }
 
-  // Modified processTextNodes function
-  const processTextNodes = (element, maps, callback) => {
-    const nodes = [];
-    const walker = document.createTreeWalker(
-      element,
-      NodeFilter.SHOW_TEXT,
-      {
-        acceptNode: (node) => {
-          const parent = node.parentElement;
-          if (parent && (
-            parent.tagName === 'SCRIPT' ||
-            parent.tagName === 'STYLE' ||
-            parent.classList.contains('no-convert') ||
-            parent.closest('#p-navigation') ||
-            parent.closest('.mw-portlet') ||
-            parent.closest('.vector-menu') ||
-            parent.closest('.mw-header')
-          )) {
-            return NodeFilter.FILTER_REJECT;
-          }
-          return NodeFilter.FILTER_ACCEPT;
-        }
-      },
-      false
-    );
-  
-    let node;
-    while (node = walker.nextNode()) {
-      if (node.textContent.trim()) {
-        nodes.push(node);
-      }
-    }
-  
-    for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
-      const batch = nodes.slice(i, i + CONFIG.BATCH_SIZE);
-      requestAnimationFrame(() => {
-        batch.forEach(node => {
-          const newText = convertText(node.textContent, maps);
-          if (newText !== node.textContent) {
-            node.textContent = newText;
-            let element = node.parentElement;
-            while (element && !element.classList.contains('mw-content-text')) {
-              if (element.nodeType === 1 && 
-                  !element.classList.contains('no-convert') &&
-                  element.closest('#mw-content-text')) {
-                element.setAttribute('dir', 'rtl');
-                element.setAttribute('lang', 'ms-arab');
-              }
-              element = element.parentElement;
-            }
-          }
-        });
-        
-        if (callback && i + CONFIG.BATCH_SIZE >= nodes.length) {
-          callback();
-        }
-      });
-    }
-  };
-  
-  // Modified applyConversion function
-  const applyConversion = (isJawi, maps) => {
-    if (isJawi) {
-      CACHE.content = CACHE.content || $contentElement.html();
-      CACHE.title = CACHE.title || $titleElement.text();
-      
-      // Only set RTL on content and title
-      $contentElement
-        .attr('dir', 'rtl')
-        .attr('lang', 'ms-arab');
-      
-      $titleElement
-        .attr('dir', 'rtl')
-        .attr('lang', 'ms-arab');
-      
-      requestAnimationFrame(() => {
-        processTextNodes($contentElement[0], maps, () => {
-          if ($titleElement[0]) {
-            const convertedTitle = convertText($titleElement.text(), maps);
-            $titleElement.text(convertedTitle);
-          }
-        });
-      });
-    } else {
-      if (CACHE.content) {
-        $contentElement
-          .html(CACHE.content)
-          .attr('dir', 'ltr')
-          .attr('lang', 'ms')
-          // Only reset dir/lang on content elements
-          .find('#mw-content-text [dir="rtl"]')
-          .removeAttr('dir')
-          .removeAttr('lang');
-        CACHE.content = null;
-      }
-      
-      if (CACHE.title) {
-        $titleElement
-          .text(CACHE.title)
-          .attr('dir', 'ltr')
-          .attr('lang', 'ms');
-        CACHE.title = null;
-      }
+      const numberPlaceholders = [];
+      const result = text
+        .replace(/\d+(?:[,.]\d+)*(?:\.\d+)?%?/g, match => {
+          const placeholder = `__NUM${numberPlaceholders.push(`\u2066${match}\u2069`) - 1}__`;
+          return placeholder;
+        })
+        .replace(new RegExp([...maps.phrasesMap.keys()]
+          .sort((a, b) => b.length - a.length)
+          .map(Utils.regexEscape)
+          .join('|'), 'gi'), match => maps.phrasesMap.get(match.toLowerCase()) || match)
+        .replace(/\b'\w+\b|\b\w+'\w*\b|\b\w+'\b/g, match => 
+          maps.wordsMap.get(match.toLowerCase()) || match)
+        .replace(/\b\w+(?:-\w+)+\b/g, match => {
+          const completeConversion = maps.wordsMap.get(match.toLowerCase());
+          return completeConversion || match.split('-')
+            .map(part => maps.wordsMap.get(part.toLowerCase()) || part)
+            .join('-');
+        })
+        .replace(/\b\w+\b/g, match => maps.wordsMap.get(match.toLowerCase()) || match)
+        .replace(/(^|[\s\u00A0]+)[کد][\s\u00A0]+(\S)/g, (_, p1, p2) => 
+          `${p1}${_[p1.length]}${p2 === 'ا' ? 'أ' : p2}`)
+        .replace(/[,;?]/g, match => CONFIG.PUNCTUATION_MAP[match] || match);
+
+      const processedText = numberPlaceholders.reduce(
+        (text, number, index) => text.replace(`__NUM${index}__`, number),
+        result
+      );
+      State.cache.processedText.set(cacheKey, processedText);
+      return processedText;
     }
   };
 
-  // Data fetching with improved error handling
-  const fetchRumiJawiData = () => {
-    const now = Date.now();
-    if (CACHE.rumiJawi && now - CACHE.lastFetch < CONFIG.CACHE_DURATION) {
-      return Promise.resolve(CACHE.rumiJawi);
-    }
-
-    if (fetchPromise) return fetchPromise;
-
-    const resultUrl = 'https://query-main.wikidata.org/sparql?query=SELECT%20DISTINCT%20%3Fform%20%3Flatn%20%3Farab%20%3Ffeature%20WHERE%20%7B%0A%20%20%3Ff%20dct%3Alanguage%20wd%3AQ9237%3B%0A%20%20%20%20%20ontolex%3AlexicalForm%20%3Fform%20FILTER%20%28lang%28%3Flatn%29%20%3D%20"ms"%29.%0A%20%20%3Fform%20ontolex%3Arepresentation%20%3Flatn%3B%0A%20%20%20%20%20ontolex%3Arepresentation%20%3Farab%20FILTER%20%28lang%28%3Farab%29%20%3D%20"ms-arab"%29.%0A%20%20OPTIONAL%20%7B%20%3Fform%20wikibase%3AgrammaticalFeature%20%3Ffeature%20%7D%0A%20%20FILTER%20%28%21BOUND%28%3Ffeature%29%20%7C%7C%20%28%3Ffeature%20%21%3D%20wd%3AQ98912%20%26%26%20%3Ffeature%20%21%3D%20wd%3AQ8185162%20%26%26%20%3Ffeature%20%21%3D%20wd%3AQ10617810%29%29%0A%7D%20ORDER%20BY%20%3Ffeature&format=json';
-
-    fetchPromise = fetch(resultUrl, {
-      headers: {
-        Accept: 'application/sparql-results+json',
-        'User-Agent': 'RumiJawiConverter/1.0'
-      },
-      mode: 'cors'
-    })
-      .then(response => {
+  const DataFetcher = {
+    async fetchData(query) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      try {
+        const response = await fetch(
+          `${CONFIG.SPARQL_ENDPOINT}?query=${encodeURIComponent(query)}&format=json`,
+          {
+            headers: {
+              Accept: 'application/sparql-results+json',
+              'User-Agent': 'RumiJawiConverter/1.0'
+            },
+            mode: 'cors',
+            signal: controller.signal
+          }
+        );
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         return response.json();
-      })
-      .then(data => {
-        const maps = processFetchedData(data);
-        CACHE.rumiJawi = maps;
-        CACHE.lastFetch = now;
-        fetchPromise = null;
-        return maps;
-      })
-      .catch(error => {
-        console.error('Error fetching Rumi-Jawi data:', error);
-        fetchPromise = null;
-        return CACHE.rumiJawi || {
-          phrasesMap: new Map(),
-          pluralsMap: new Map(),
-          othersMap: new Map()
-        };
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    },
+
+    async fetchRumiJawiData() {
+      const now = Date.now();
+      if (State.cache.rumiJawi && now - State.cache.lastFetch < CONFIG.CACHE_DURATION) {
+        return State.cache.rumiJawi;
+      }
+      if (State.fetchPromise) return State.fetchPromise;
+      State.fetchPromise = this.fetchData(CONFIG.QUERY)
+        .then(data => {
+          const maps = TextConverter.processFetchedData(data);
+          State.cache.rumiJawi = maps;
+          State.cache.lastFetch = now;
+          State.fetchPromise = null;
+          return maps;
+        })
+        .catch(error => {
+          console.error('Error fetching Rumi-Jawi data:', error);
+          State.fetchPromise = null;
+          return State.cache.rumiJawi || {
+            phrasesMap: new Map(),
+            wordsMap: new Map()
+          };
+        });
+      return State.fetchPromise;
+    }
+  };
+
+  const DOMHandler = {
+    observer: null,
+
+    initObserver() {
+      this.observer = new IntersectionObserver(entries => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            this.processElement(entry.target);
+            this.observer.unobserve(entry.target);
+          }
+        });
       });
+    },
 
-    return fetchPromise;
+    processElement(element) {
+      const walker = document.createTreeWalker(
+        element,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: node => {
+            const parent = node.parentElement;
+            return parent && (
+              parent.tagName === 'SCRIPT' ||
+              parent.tagName === 'STYLE' ||
+              parent.classList.contains('no-convert') ||
+              parent.closest('#p-navigation, .mw-portlet, .vector-menu, .mw-header')
+            ) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT;
+          }
+        }
+      );
+
+      const nodes = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        if (node.textContent.trim()) nodes.push(node);
+      }
+      for (let i = 0; i < nodes.length; i += CONFIG.BATCH_SIZE) {
+        const batch = nodes.slice(i, i + CONFIG.BATCH_SIZE);
+        requestAnimationFrame(() => this.processBatch(batch));
+      }
+    },
+
+    processBatch(nodes) {
+      nodes.forEach(node => {
+        let nodeCache = State.nodeCacheStore.get(node);
+        if (!nodeCache) {
+          nodeCache = new Map();
+          State.nodeCacheStore.set(node, nodeCache);
+        }
+        const cacheKey = `${node.textContent}-${State.cache.currentScript}`;
+        if (nodeCache.has(cacheKey)) {
+          node.textContent = nodeCache.get(cacheKey);
+          this.updateElementDirection(node.parentElement);
+          return;
+        }
+        const newText = TextConverter.convertText(node.textContent, State.cache.rumiJawi);
+        if (newText !== node.textContent) {
+          nodeCache.set(cacheKey, newText);
+          node.textContent = newText;
+          this.updateElementDirection(node.parentElement);
+        }
+      });
+    },
+
+    updateElementDirection(element) {
+      while (element && !element.classList.contains('mw-content-text')) {
+        if (
+          element.nodeType === 1 &&
+          !element.classList.contains('no-convert') &&
+          element.closest('#mw-content-text')
+        ) {
+          element.setAttribute('dir', 'rtl');
+          element.setAttribute('lang', 'ms-arab');
+        }
+        element = element.parentElement;
+      }
+    },
+
+    async applyConversion(isJawi) {
+      if (!this.observer) this.initObserver();
+      if (isJawi) {
+        State.cache.content = State.cache.content || State.elements.content.innerHTML;
+        State.cache.title = State.cache.title || State.elements.title.textContent;
+        State.elements.content.setAttribute('dir', 'rtl');
+        State.elements.content.setAttribute('lang', 'ms-arab');
+        State.elements.title.setAttribute('dir', 'rtl');
+        State.elements.title.setAttribute('lang', 'ms-arab');
+        this.observer.observe(State.elements.content);
+        if (State.elements.title) {
+          State.elements.title.textContent = TextConverter.convertText(
+            State.elements.title.textContent, 
+            State.cache.rumiJawi
+          );
+        }
+      } else {
+        if (State.cache.content) {
+          State.elements.content.innerHTML = State.cache.content;
+          State.elements.content.setAttribute('dir', 'ltr');
+          State.elements.content.setAttribute('lang', 'ms');
+          const rtlElements = State.elements.content.querySelectorAll('#mw-content-text [dir="rtl"]');
+          rtlElements.forEach(el => {
+            el.removeAttribute('dir');
+            el.removeAttribute('lang');
+          });
+          State.cache.content = null;
+        }
+        if (State.cache.title) {
+          State.elements.title.textContent = State.cache.title;
+          State.elements.title.setAttribute('dir', 'ltr');
+          State.elements.title.setAttribute('lang', 'ms');
+          State.cache.title = null;
+        }
+        State.nodeCacheStore = new WeakMap();
+      }
+    }
   };
 
-  // User preference handling
-  const saveUserLanguagePreference = (language) => {
-    return new mw.Api().saveOption("language", language)
-      .then(() => console.log(`Language preference set to ${language}`))
-      .catch(error => console.error("Failed to save language preference:", error));
+  const ElementCache = {
+    store: new WeakMap(),
+    get(selector) {
+      const element = document.querySelector(selector);
+      if (!element) return null;
+      if (!this.store.has(element)) {
+        this.store.set(element, element);
+      }
+      return this.store.get(element);
+    }
   };
 
-  // Initialization
-  const initRumiJawi = () => {
-    if (isInitialized) return Promise.resolve();
-    
-    return Promise.resolve().then(() => {
-      if (typeof jQuery === 'undefined') throw new Error('jQuery is not loaded');
-      if (typeof mw === 'undefined' || !mw.config) throw new Error('MediaWiki configuration is not available');
-      
-      isInitialized = true;
-      console.log('Rumi-Jawi converter initialized successfully');
-    }).catch(error => {
-      console.error('Failed to initialize Rumi-Jawi converter:', error);
-      throw error;
-    });
-  };
-
-  // Radio button setup with improved styles
-  const setupRadioButtons = () => {
-    try {
-      const $interactionMenu = $('#p-navigation ul');
-      if (!$interactionMenu.length) return;
-  
-      // Style definitions
-      const codexStyles = `
+  const UIManager = {
+    elementCache: new WeakMap(),
+    async saveUserLanguagePreference(language) {
+      try {
+        await new mw.Api().saveOption("language", language);
+        console.log(`Language preference set to ${language}`);
+      } catch (error) {
+        console.error("Failed to save language preference:", error);
+      }
+    },
+    setupStyles() {
+      const existingStyles = document.getElementById('rumi-jawi-styles');
+      if (existingStyles) existingStyles.remove();
+      const styles = `
         #ca-nstab-rkj {
           font-family: sans-serif;
           font-weight: normal;
@@ -384,19 +345,14 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
           border: none !important;
           background: none !important;
         }
-        #ca-nstab-rkj .cdx-field {
-          padding: 0;
-          margin: 0;
-        }
+        .cdx-field { padding: 0; margin: 0; }
         .cdx-label--title {
           font-weight: bold;
           display: block;
-          margin-bottom: 4px;
-          margin-top: 4px;
+          margin: 4px 0;
         }
         .cdx-radio--inline {
           display: flex;
-          flex-direction: row;
           align-items: center;
           gap: 8px;
         }
@@ -412,16 +368,11 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
           font-weight: normal;
           cursor: pointer;
         }
-        .cdx-radio__label-content {
-          color: inherit;
-        }
         .cdx-radio__icon {
           width: 14px;
           height: 14px;
         }
-        .cdx-radio__input {
-          margin: 0;
-        }
+        .cdx-radio__input { margin: 0; }
         .cdx-radio__input:checked + .cdx-radio__icon {
           background-color: var(--color-progressive, #36c);
           border-color: var(--color-progressive, #36c);
@@ -434,150 +385,156 @@ if ([0, 1, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15].includes(mw.config.get('wgNames
           border-color: var(--color-progressive, #36c);
         }
       `;
-  
-      $('#rumi-jawi-styles').remove();
-      $('head').append(`<style id="rumi-jawi-styles">${codexStyles}</style>`);
-  
-      $interactionMenu.append(`
-        <li id="ca-nstab-rkj">
+      const styleElement = document.createElement('style');
+      styleElement.id = 'rumi-jawi-styles';
+      styleElement.textContent = styles;
+      document.head.appendChild(styleElement);
+    },
+    setupRadioButtons() {
+      try {
+        const interactionMenu = document.querySelector('#p-navigation ul');
+        if (!interactionMenu) return;
+        this.setupStyles();
+        const scriptConverterLi = document.createElement('li');
+        scriptConverterLi.id = 'ca-nstab-rkj';
+        const uiLanguageLi = document.createElement('li');
+        uiLanguageLi.id = 'ca-ui-language';
+        scriptConverterLi.innerHTML = `
           <div class="cdx-field">
             <label class="cdx-label cdx-label--title">
-              <span class="cdx-label__text convertible-text" data-rumi="Penukar tulisan">Penukar tulisan</span>
+              <span class="cdx-label__text convertible-text" data-rumi="Penukar tulisan">
+                Penukar tulisan
+              </span>
             </label>
             <div class="cdx-radio cdx-radio--inline" role="radiogroup" aria-label="Script Selection">
               <div class="cdx-radio__content">
-                <label class="cdx-radio__label">
-                  <input type="radio" class="cdx-radio__input" name="rumi-jawi" value="rumi" 
-                         ${CACHE.currentScript === 'rumi' ? 'checked' : ''} aria-checked="${CACHE.currentScript === 'rumi'}">
-                  <span class="cdx-radio__icon" aria-hidden="true"></span>
-                  <span class="cdx-radio__label-content convertible-text" data-rumi="Rumi">Rumi</span>
-                </label>
+                ${this.createRadioButton('rumi-jawi', 'rumi', 'Rumi')}
               </div>
               <div class="cdx-radio__content">
-                <label class="cdx-radio__label">
-                  <input type="radio" class="cdx-radio__input" name="rumi-jawi" value="jawi" 
-                         ${CACHE.currentScript === 'jawi' ? 'checked' : ''} aria-checked="${CACHE.currentScript === 'jawi'}">
-                  <span class="cdx-radio__icon" aria-hidden="true"></span>
-                  <span class="cdx-radio__label-content convertible-text" data-rumi="Jawi">Jawi</span>
-                </label>
+                ${this.createRadioButton('rumi-jawi', 'jawi', 'Jawi')}
               </div>
             </div>
           </div>
-        </li>
-        <li id="ca-ui-language">
+        `;
+        uiLanguageLi.innerHTML = `
           <div class="cdx-field">
             <label class="cdx-label cdx-label--title">
-              <span class="cdx-label__text convertible-text" data-rumi="Penukar antara muka">Penukar antara muka</span>
+              <span class="cdx-label__text convertible-text" data-rumi="Penukar antara muka">
+                Penukar antara muka
+              </span>
             </label>
             <div class="cdx-radio cdx-radio--inline" role="radiogroup" aria-label="UI Language Selection">
               <div class="cdx-radio__content">
-                <label class="cdx-radio__label">
-                  <input type="radio" class="cdx-radio__input" name="ui-language" value="rumi-ui">
-                  <span class="cdx-radio__icon" aria-hidden="true"></span>
-                  <span class="cdx-radio__label-content" data-rumi="ms-latn">ms-latn</span>
-                </label>
+                ${this.createRadioButton('ui-language', 'rumi-ui', 'ms-latn')}
               </div>
               <div class="cdx-radio__content">
-                <label class="cdx-radio__label">
-                  <input type="radio" class="cdx-radio__input" name="ui-language" value="jawi-ui">
-                  <span class="cdx-radio__icon" aria-hidden="true"></span>
-                  <span class="cdx-radio__label-content" data-rumi="ms-arab">ms-arab</span>
-                </label>
+                ${this.createRadioButton('ui-language', 'jawi-ui', 'ms-arab')}
               </div>
             </div>
           </div>
-        </li>
-      `);
-	    // Enhanced script conversion handler with state management and label conversion
-	    $('.cdx-radio__input[name="rumi-jawi"]').on('change', function() {
-	      const isJawi = $(this).val() === 'jawi';
-	      CACHE.currentScript = isJawi ? 'jawi' : 'rumi';
-	      
-	      // Update ARIA states
-	      $('.cdx-radio__input[name="rumi-jawi"]').each(function() {
-	        $(this).attr('aria-checked', $(this).prop('checked'));
-	      });
-	      
-	      const initPromise = isInitialized ? Promise.resolve() : initRumiJawi();
-	      
-	      initPromise
-	        .then(() => fetchRumiJawiData())
-	        .then((maps) => {
-	          // Convert UI labels
-	          $('.convertible-text').each(function() {
-	            const $element = $(this);
-	            const rumiText = $element.attr('data-rumi');
-	            if (isJawi) {
-	              const jawiText = convertText(rumiText, maps);
-	              $element.text(jawiText);
-	            } else {
-	              $element.text(rumiText);
-	            }
-	          });
-	
-	          // Apply conversion to content
-	          applyConversion(isJawi, maps);
-	          if (isJawi) {
-	            CACHE.content = CACHE.content || $contentElement.html();
-	            CACHE.title = CACHE.title || $titleElement.html();
-	            $titleElement.attr('dir', 'rtl');
-	            $contentElement.attr('dir', 'rtl');
-	            return processTextNodes($contentElement[0], maps, () => {
-	              if ($titleElement[0]) {
-	                $titleElement.text(convertText($titleElement.text(), maps));
-	              }
-	            });
-	          } else {
-	            $titleElement.attr('dir', 'ltr');
-	            $contentElement.attr('dir', 'ltr');
-	            if (CACHE.content && CACHE.title) {
-	              $contentElement.html(CACHE.content);
-	              $titleElement.html(CACHE.title);
-	              CACHE.content = null;
-	              CACHE.title = null;
-	            }
-	          }
-	        })
-	        .catch(error => {
-	          console.error('Conversion error:', error);
-	          // Revert to previous state on error
-	          const previousState = isJawi ? 'rumi' : 'jawi';
-	          CACHE.currentScript = previousState;
-	          $(`input[value="${previousState}"]`).prop('checked', true).trigger('change');
-	        });
-	    });
-	
-	    // UI language handler remains the same
-	    $('.cdx-radio__input[name="ui-language"]').on('change', function() {
-	      const language = $(this).val() === 'jawi-ui' ? 'ms-arab' : 'ms';
-	      saveUserLanguagePreference(language).then(() => {
-	        window.location.reload();
-	      });
-	    });
-	
-	    // Set initial UI language radio button state
-	    const currentLanguage = mw.config.get('wgUserLanguage');
-	    if (currentLanguage === 'ms-arab') {
-	      $('input[name="ui-language"][value="jawi-ui"]').prop('checked', true);
-	    } else {
-	      $('input[name="ui-language"][value="rumi-ui"]').prop('checked', true);
-	    }
-	  } catch (error) {
-	    console.error('Radio button setup error:', error);
-	  }
-	};
+        `;
+        interactionMenu.appendChild(scriptConverterLi);
+        interactionMenu.appendChild(uiLanguageLi);
+        this.setupEventHandlers();
+        this.setInitialUILanguage();
+      } catch (error) {
+        console.error('Radio button setup error:', error);
+      }
+    },
+    createRadioButton(name, value, label) {
+      const isChecked = (name === 'rumi-jawi' && value === State.cache.currentScript) ||
+                        (name === 'ui-language' &&
+                         ((value === 'jawi-ui' && mw.config.get('wgUserLanguage') === 'ms-arab') ||
+                          (value === 'rumi-ui' && mw.config.get('wgUserLanguage') !== 'ms-arab')));
+      const isLanguageCode = label === 'ms-arab' || label === 'ms-latn';
+      const labelContent = isLanguageCode
+        ? `<span class="cdx-radio__label-content">${label}</span>`
+        : `<span class="cdx-radio__label-content convertible-text" data-rumi="${label}">${label}</span>`;
+      return `
+        <label class="cdx-radio__label">
+          <input type="radio" class="cdx-radio__input" name="${name}" value="${value}" ${isChecked ? 'checked' : ''} aria-checked="${isChecked}">
+          <span class="cdx-radio__icon" aria-hidden="true"></span>
+          ${labelContent}
+        </label>
+      `;
+    },
+    getConvertibleElements() {
+      if (!this.elementCache.has(document)) {
+        const elements = document.querySelectorAll('.convertible-text');
+        this.elementCache.set(document, elements);
+      }
+      return this.elementCache.get(document);
+    },
+    setupEventHandlers() {
+      const rumiJawiRadios = document.querySelectorAll('.cdx-radio__input[name="rumi-jawi"]');
+      rumiJawiRadios.forEach(radio => {
+        radio.addEventListener('change', async function() {
+          const isJawi = this.value === 'jawi';
+          State.cache.currentScript = isJawi ? 'jawi' : 'rumi';
+          document.querySelectorAll('.cdx-radio__input[name="rumi-jawi"]').forEach(input => {
+            input.setAttribute('aria-checked', input.checked.toString());
+          });
+          try {
+            if (!State.isInitialized) await initRumiJawi();
+            const maps = await DataFetcher.fetchRumiJawiData();
+            const convertibleElements = UIManager.getConvertibleElements();
+            Array.from(convertibleElements).forEach(element => {
+              const rumiText = element.getAttribute('data-rumi');
+              element.textContent = isJawi ? TextConverter.convertText(rumiText, maps) : rumiText;
+            });
+            DOMHandler.applyConversion(isJawi);
+          } catch (error) {
+            console.error('Conversion error:', error);
+            const previousState = isJawi ? 'rumi' : 'jawi';
+            State.cache.currentScript = previousState;
+            const prevRadio = document.querySelector(`input[value="${previousState}"]`);
+            if (prevRadio) {
+              prevRadio.checked = true;
+              prevRadio.setAttribute('aria-checked', 'true');
+              prevRadio.dispatchEvent(new Event('change'));
+            }
+          }
+        });
+      });
+      const uiLanguageRadios = document.querySelectorAll('.cdx-radio__input[name="ui-language"]');
+      uiLanguageRadios.forEach(radio => {
+        radio.addEventListener('change', async function() {
+          const language = this.value === 'jawi-ui' ? 'ms-arab' : 'ms';
+          await UIManager.saveUserLanguagePreference(language);
+          window.location.reload();
+        });
+      });
+    },
+    setInitialUILanguage() {
+      const currentLanguage = mw.config.get('wgUserLanguage');
+      const value = currentLanguage === 'ms-arab' ? 'jawi-ui' : 'rumi-ui';
+      const radio = document.querySelector(`input[name="ui-language"][value="${value}"]`);
+      if (radio) radio.checked = true;
+    }
+  };
 
-  // Rest of the code remains the same
-  $(document).ready(() => {
-    $contentElement = $('#mw-content-text').eq(0);
-    $titleElement = $('.mw-first-heading').eq(0);
-    
-    if (!$contentElement.length || !$titleElement.length) {
+  function onDocumentReady(fn) {
+    if (document.readyState === 'complete' || document.readyState === 'interactive') {
+      setTimeout(fn, 1);
+    } else {
+      document.addEventListener('DOMContentLoaded', fn);
+    }
+  }
+  
+  onDocumentReady(() => {
+    State.elements.content = document.querySelector('#mw-content-text');
+    State.elements.title = document.querySelector('.mw-first-heading');
+    if (!State.elements.content || !State.elements.title) {
       console.error('Content elements not found');
       return;
     }
-
-    setupRadioButtons();
-    initRumiJawi().catch(error => console.error('Initialization failed:', error));
+    UIManager.setupRadioButtons();
+    window.initRumiJawi = async () => {
+      if (State.isInitialized) return;
+      if (!window.mw?.config) throw new Error('MediaWiki configuration is not available');
+      State.isInitialized = true;
+      console.log('Rumi-Jawi converter initialized successfully');
+    };
+    window.initRumiJawi().catch(error => console.error('Initialization failed:', error));
   });
-}
+})();
