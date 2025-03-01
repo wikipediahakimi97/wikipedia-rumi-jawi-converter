@@ -15,9 +15,18 @@
 */
 
 (() => {
-  // Early exit for unsupported namespaces
-  const SUPPORTED_NAMESPACES = new Set([0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15]);
-  if (!SUPPORTED_NAMESPACES.has(mw.config.get('wgNamespaceNumber'))) return;
+  // All namespaces should be able to be converted
+  if (mw.config.get('wgNamespaceNumber') === undefined) return;
+
+  // Skip initialization if in edit mode or Visual Editor
+  if (mw.config.get('wgAction') === 'edit' || 
+      mw.config.get('wgAction') === 'submit' ||
+      document.querySelector('.ve-active') !== null ||
+      document.querySelector('.wikiEditor-ui') !== null ||
+      mw.config.get('wgVisualEditor')?.isActive === true) {
+    console.log('Edit mode or Visual Editor detected - Rumi-Jawi converter disabled');
+    return;
+  }
 
   // Constants using Object.freeze for immutability
   const CONFIG = Object.freeze({
@@ -513,6 +522,15 @@
     }
   };
 
+  // Helper function to check if we're in any editor view
+  function isInEditorMode() {
+    return mw.config.get('wgAction') === 'edit' || 
+           mw.config.get('wgAction') === 'submit' ||
+           document.querySelector('.ve-active') !== null ||
+           document.querySelector('.wikiEditor-ui') !== null ||
+           mw.config.get('wgVisualEditor')?.isActive === true;
+  }
+
   function onDocumentReady(fn) {
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
       setTimeout(fn, 1);
@@ -522,6 +540,12 @@
   }
   
   onDocumentReady(() => {
+    // Check again if we're in edit mode (in case the page state changed after initial load)
+    if (isInEditorMode()) {
+      console.log('Edit mode or Visual Editor detected - Rumi-Jawi converter disabled');
+      return;
+    }
+    
     State.elements.content = document.querySelector('#mw-content-text');
     State.elements.title = document.querySelector('.mw-first-heading');
     if (!State.elements.content || !State.elements.title) {
