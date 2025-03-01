@@ -15,9 +15,18 @@
 */
 
 (() => {
-  // Early exit for unsupported namespaces
-  const SUPPORTED_NAMESPACES = new Set([0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 12, 13, 14, 15]);
-  if (!SUPPORTED_NAMESPACES.has(mw.config.get('wgNamespaceNumber'))) return;
+  // All namespaces should be able to be converted
+  if (mw.config.get('wgNamespaceNumber') === undefined) return;
+
+  // Skip initialization if in edit mode or Visual Editor
+  if (mw.config.get('wgAction') === 'edit' || 
+      mw.config.get('wgAction') === 'submit' ||
+      document.querySelector('.ve-active') !== null ||
+      document.querySelector('.wikiEditor-ui') !== null ||
+      mw.config.get('wgVisualEditor')?.isActive === true) {
+    console.log('Edit mode or Visual Editor detected - Rumi-Jawi converter disabled');
+    return;
+  }
 
   // Constants using Object.freeze for immutability
   const CONFIG = Object.freeze({
@@ -44,7 +53,7 @@
     PUNCTUATION_MAP: { ',': '⹁', ';': '⁏', '?': '؟' }
   });
 
-  // Simplified state object (using a plain object instead of a Proxy)
+  // Simplified state object
   const State = {
     cache: {
       content: null,
@@ -64,7 +73,7 @@
     fetchPromise: null
   };
 
-  // Word-to-regex cache (using string keys)
+  // Cache for word-to-regex using string keys
   const stringRegexCache = new Map();
 
   const Utils = {
@@ -102,12 +111,12 @@
           Utils.createRumiVariants(rumi).forEach(variant => maps.wordsMap.set(variant, jawi));
         }
       });
-
       return maps;
     },
 
     convertText(text, maps) {
       if (!text?.trim()) return text;
+      
       const cacheKey = `${text}-${State.cache.currentScript}`;
       if (State.cache.processedText.has(cacheKey)) {
         return State.cache.processedText.get(cacheKey);
@@ -140,7 +149,6 @@
         (text, number, index) => text.replace(`__NUM${index}__`, number),
         result
       );
-
       State.cache.processedText.set(cacheKey, processedText);
       return processedText;
     }
@@ -225,6 +233,7 @@
           }
         }
       );
+
       const nodes = [];
       let node;
       while ((node = walker.nextNode())) {
@@ -274,7 +283,6 @@
 
     async applyConversion(isJawi) {
       if (!this.observer) this.initObserver();
-
       if (isJawi) {
         State.cache.content = State.cache.content || State.elements.content.innerHTML;
         State.cache.title = State.cache.title || State.elements.title.textContent;
@@ -324,6 +332,7 @@
     }
   };
 
+  // Replacing with the new UIManager implementation
   const UIManager = {
     elementCache: new WeakMap(),
 
@@ -595,8 +604,27 @@
       } catch (error) {
         console.error('Radio button setup error:', error);
       }
+    },
+
+    // Preserve original functionality that wasn't in the second implementation
+    async saveUserLanguagePreference(language) {
+      try {
+        await new mw.Api().saveOption("language", language);
+        console.log(`Language preference set to ${language}`);
+      } catch (error) {
+        console.error("Failed to save language preference:", error);
+      }
     }
   };
+
+  // Helper function to check if we're in any editor view
+  function isInEditorMode() {
+    return mw.config.get('wgAction') === 'edit' || 
+           mw.config.get('wgAction') === 'submit' ||
+           document.querySelector('.ve-active') !== null ||
+           document.querySelector('.wikiEditor-ui') !== null ||
+           mw.config.get('wgVisualEditor')?.isActive === true;
+  }
 
   function onDocumentReady(fn) {
     if (document.readyState === 'complete' || document.readyState === 'interactive') {
@@ -607,6 +635,12 @@
   }
   
   onDocumentReady(() => {
+    // Check again if we're in edit mode (in case the page state changed after initial load)
+    if (isInEditorMode()) {
+      console.log('Edit mode or Visual Editor detected - Rumi-Jawi converter disabled');
+      return;
+    }
+    
     State.elements.content = document.querySelector('#mw-content-text');
     State.elements.title = document.querySelector('.mw-first-heading');
     if (!State.elements.content || !State.elements.title) {
