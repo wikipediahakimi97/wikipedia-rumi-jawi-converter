@@ -27,19 +27,23 @@
     API: {
       SPARQL: "https://query-main.wikidata.org/sparql",
       QUERY: `SELECT DISTINCT ?formId ?latn ?arab (GROUP_CONCAT(DISTINCT ?featureLabel; SEPARATOR=", ") AS ?features) 
-        WHERE {
-          ?lexEntry dct:language wd:Q9237;
-                   ontolex:lexicalForm ?form.
-          BIND(STRAFTER(STR(?form), "http://www.wikidata.org/entity/") AS ?formId)
-          ?form ontolex:representation ?latn FILTER (lang(?latn) = "ms")
-          ?form ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab")
-          OPTIONAL { 
-            ?form wikibase:grammaticalFeature ?feature.
-            ?feature rdfs:label ?featureLabel FILTER (lang(?featureLabel) = "en")
-            FILTER (?feature NOT IN (wd:Q98912, wd:Q8185162, wd:Q10617810))
-          }
-        }
-        GROUP BY ?formId ?latn ?arab`
+		WHERE {
+		  ?lexEntry dct:language wd:Q9237;
+		           ontolex:lexicalForm ?form.
+		  BIND(STRAFTER(STR(?form), "http://www.wikidata.org/entity/") AS ?formId)
+		  ?form ontolex:representation ?latn FILTER (lang(?latn) = "ms")
+		  ?form ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab")
+		  OPTIONAL { 
+		    ?form wikibase:grammaticalFeature ?feature.
+		    ?feature rdfs:label ?featureLabel FILTER (lang(?featureLabel) = "en")
+		  }
+		  FILTER (!BOUND(?feature) || (
+		    ?feature != wd:Q98912 && 
+		    ?feature != wd:Q8185162 && 
+		    ?feature != wd:Q10617810
+		  ))
+		}
+		GROUP BY ?formId ?latn ?arab`
     },
     // UI related constants
     UI: {
