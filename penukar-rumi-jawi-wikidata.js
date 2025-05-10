@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 3rd May 2025
+ ** Updated on 10th May 2025
  **
  **/
 
@@ -51,7 +51,8 @@
       NOCONVERT_CLASS: "no-convert-text",
       TEMPLATE_DATA_ATTR: "data-form-id",
       TEMPLATE_ORIG_TEXT_ATTR: "data-rumi-text",
-      SUPPORTED_SKINS: ["vector-2022", "vector", "monobook", "timeless", "minerva"]
+      SUPPORTED_SKINS: ["vector-2022", "vector", "monobook", "timeless", "minerva"],
+      NAMESPACE_CLASS: "mw-list-item"
     },
     // Conversion maps
     MAPS: {
@@ -73,13 +74,13 @@
     dictionary: null,
     templateOverrides: new Map(),
     initialized: false,
-    
+
     init(content, title) {
       this.content = content;
       this.title = title;
       return this;
     },
-    
+
     setScript(script) {
       this.script = script;
       return this;
@@ -91,15 +92,18 @@
     async fetch() {
       const cached = this.loadFromCache();
       if (cached) return cached;
-      
+
       return await this.fetchFromAPI();
     },
-    
+
     loadFromCache() {
       try {
         const cached = localStorage.getItem(CONFIG.APP.CACHE_KEY);
         if (cached) {
-          const { timestamp, data } = JSON.parse(cached);
+          const {
+            timestamp,
+            data
+          } = JSON.parse(cached);
           if (Date.now() - timestamp < CONFIG.APP.CACHE_DURATION) {
             return data;
           }
@@ -126,10 +130,10 @@
         clearTimeout(timeoutId);
 
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        
+
         const result = await response.json();
         const processedData = this.process(result);
-        
+
         try {
           localStorage.setItem(CONFIG.APP.CACHE_KEY, JSON.stringify({
             timestamp: Date.now(),
@@ -138,11 +142,16 @@
         } catch (e) {
           console.warn("Error storing in localStorage:", e);
         }
-        
+
         return processedData;
       } catch (error) {
         console.error("Error fetching Rumi-Jawi data:", error);
-        return { words: {}, phrases: {}, forms: {}, formMappings: {} };
+        return {
+          words: {},
+          phrases: {},
+          forms: {},
+          formMappings: {}
+        };
       }
     },
 
@@ -154,7 +163,11 @@
         formMappings: {}
       };
 
-      data.results.bindings.forEach(({ formId, latn, arab }) => {
+      data.results.bindings.forEach(({
+        formId,
+        latn,
+        arab
+      }) => {
         const rumiText = latn.value.toLowerCase();
         const jawiText = arab.value;
         const formIdValue = formId.value;
@@ -210,11 +223,11 @@
             if (!parent) return NodeFilter.FILTER_REJECT;
 
             // Skip conversion for templates and other special elements
-            if (parent.tagName === "SCRIPT" || 
-                parent.tagName === "STYLE" ||
-                parent.classList.contains(CONFIG.UI.NOCONVERT_CLASS) ||
-                parent.classList.contains(CONFIG.UI.TEMPLATE_CLASS) ||
-                parent.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header")) {
+            if (parent.tagName === "SCRIPT" ||
+              parent.tagName === "STYLE" ||
+              parent.classList.contains(CONFIG.UI.NOCONVERT_CLASS) ||
+              parent.classList.contains(CONFIG.UI.TEMPLATE_CLASS) ||
+              parent.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header")) {
               return NodeFilter.FILTER_REJECT;
             }
 
@@ -322,7 +335,7 @@
       result = result.replace(/\b\w+(?:-\w+)+\b/g, match => {
         const formId = dict.words[match.toLowerCase()];
         if (formId) return dict.forms[formId];
-        
+
         return match.split("-")
           .map(part => {
             const partFormId = dict.words[part.toLowerCase()];
@@ -372,13 +385,15 @@
     collectOverrides() {
       const templateElements = document.querySelectorAll(`.${CONFIG.UI.TEMPLATE_CLASS}`);
       State.templateOverrides.clear();
-      
+
       templateElements.forEach(element => {
         const rumiText = element.getAttribute(CONFIG.UI.TEMPLATE_ORIG_TEXT_ATTR)?.toLowerCase();
         const formId = element.getAttribute(CONFIG.UI.TEMPLATE_DATA_ATTR);
-        
+
         if (rumiText && formId) {
-          State.templateOverrides.set(rumiText, { formId });
+          State.templateOverrides.set(rumiText, {
+            formId
+          });
         }
       });
     },
@@ -387,7 +402,7 @@
       document.querySelectorAll(`.${CONFIG.UI.TEMPLATE_CLASS}`).forEach(element => {
         const rumiText = element.getAttribute(CONFIG.UI.TEMPLATE_ORIG_TEXT_ATTR);
         const formId = element.getAttribute(CONFIG.UI.TEMPLATE_DATA_ATTR);
-        
+
         if (!this.validateFormMapping(formId, rumiText, State.dictionary)) {
           element.classList.add(CONFIG.UI.NOCONVERT_CLASS);
           element.classList.remove(CONFIG.UI.TEMPLATE_CLASS);
@@ -411,14 +426,14 @@
       const potentialTemplates = document.querySelectorAll("[data-form-id]");
       potentialTemplates.forEach(element => {
         if (element.classList.contains(CONFIG.UI.TEMPLATE_CLASS)) return;
-        
+
         const formId = element.getAttribute(CONFIG.UI.TEMPLATE_DATA_ATTR);
         if (!formId) return;
-        
+
         if (!element.hasAttribute(CONFIG.UI.TEMPLATE_ORIG_TEXT_ATTR)) {
           element.setAttribute(CONFIG.UI.TEMPLATE_ORIG_TEXT_ATTR, element.textContent);
         }
-        
+
         element.classList.add(CONFIG.UI.TEMPLATE_CLASS);
       });
 
@@ -428,7 +443,7 @@
           element.classList.add(CONFIG.UI.NOCONVERT_CLASS);
         }
       });
-      
+
       console.log(`Initialized ${document.querySelectorAll(`.${CONFIG.UI.TEMPLATE_CLASS}`).length} form templates`);
       console.log(`Initialized ${document.querySelectorAll(`.${CONFIG.UI.NOCONVERT_CLASS}`).length} no-convert templates`);
     }
@@ -436,124 +451,120 @@
 
   // UI manager
   const UIManager = {
+    // Replace the setupStyles method in UIManager with this scoped version
     setupStyles() {
       const existingStyles = document.getElementById("rumi-jawi-styles");
       if (existingStyles) existingStyles.remove();
-      
+
       const isMobile = mw.config.get("skin") === "minerva";
       const css = `
-        /* Base styles for converter container */
-        #ca-nstab-rkj, #ca-ui-language {
-          font-family: inherit;
-          font-weight: normal;
-          display: block;
-          margin: ${isMobile ? "8px 0" : "0"};
-        }
-        
-        /* Label title */
-        .cdx-label--title {
-          font-weight: bold;
-          display: block;
-          margin: ${isMobile ? "0" : "4px 0"};
-          padding: ${isMobile ? "8px 16px 4px" : "0"};
-          color: var(--color-base, #54595d);
-        }
-        
-        /* Radio button group */
-        .cdx-radio--inline {
-          display: flex;
-          flex-direction: ${isMobile ? "column" : "row"};
-          align-items: ${isMobile ? "flex-start" : "center"};
-          ${!isMobile ? "gap: 8px;" : ""}
-        }
-        
-        /* Radio button container */
-        .cdx-radio__content {
-          display: flex;
-          align-items: center;
-          margin: 0;
-          ${isMobile ? `
-            width: 100%;
-            padding: 8px 16px;
-          ` : ""}
-        }
-        
-        /* Radio button label */
-        .cdx-radio__label {
-          display: flex;
-          align-items: center;
-          cursor: pointer;
-          gap: ${isMobile ? "12px" : "4px"};
-          ${isMobile ? "width: 100%;" : ""}
-        }
-        
-        /* Radio input */
-        .cdx-radio__input {
-          ${isMobile ? `
-            position: absolute;
-            opacity: 0;
-          ` : "margin: 0;"}
-        }
-        
-        /* Radio icon */
-        .cdx-radio__icon {
-          width: ${isMobile ? "20px" : "14px"};
-          height: ${isMobile ? "20px" : "14px"};
-          ${isMobile ? `
-            border: 2px solid var(--color-notice, #72777d);
-            border-radius: 50%;
-            position: relative;
-            flex-shrink: 0;
-          ` : ""}
-        }
-        
-        /* Radio checked state */
-        .cdx-radio__input:checked + .cdx-radio__icon {
-          border-color: var(--color-progressive, #36c);
-        }
-        
-        ${isMobile ? `
-          /* Mobile-specific checked state */
-          .cdx-radio__input:checked + .cdx-radio__icon:after {
-            content: '';
-            position: absolute;
-            width: 10px;
-            height: 10px;
-            background: var(--color-progressive, #36c);
-            border-radius: 50%;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-          }
-          
-          /* Mobile text styles */
-          .cdx-radio__label-content {
-            color: var(--color-base, #202122);
-            font-size: 14px;
-          }
-        ` : ""}
-        
-        /* Label content checked state */
-        .cdx-radio__input:checked ~ .cdx-radio__label-content {
-          color: var(--color-progressive, #36c);
-          font-weight: ${isMobile ? "500" : "bold"};
-        }
-        
-        /* Template styles */
-        .${CONFIG.UI.TEMPLATE_CLASS} {
-          display: inline;
-        }
-        
-        /* Skin-specific adjustments for Minerva */
-        ${isMobile ? `
-          .skin-minerva-latest #ca-nstab-rkj,
-          .skin-minerva-latest #ca-ui-language {
-            padding: 0 16px !important;
-            width: 100%;
-          }
-        ` : ""}
-      `;
+    /* Use more specific selectors with a unique namespace */
+    /* Base styles for converter container */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS},
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} {
+      font-family: inherit;
+      font-weight: normal;
+      display: block;
+      margin: ${isMobile ? "8px 0" : "0"};
+    }
+    
+    /* Label title */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-label--title,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-label--title {
+      font-weight: bold;
+      display: block;
+      margin: ${isMobile ? "0" : ""};
+      padding: ${isMobile ? "8px 16px 4px" : "0"};
+      color: var(--color-base, #54595d);
+    }
+    
+    /* Radio button group */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio--inline,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio--inline {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    
+    /* Radio button container */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__content,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__content {
+      display: flex;
+      align-items: center;
+      margin: 0;
+      width: 100%;
+      padding: ${isMobile ? "8px 16px" : "4px 0"};
+    }
+    
+    /* Radio button label */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__label,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__label {
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+      gap: ${isMobile ? "12px" : "4px"};
+      width: 100%;
+    }
+    
+    /* Radio input */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input {
+      ${isMobile ? `
+        position: absolute;
+        opacity: 0;
+      ` : "margin: 0;"}
+    }
+    
+    /* Radio icon */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__icon,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__icon {
+      width: ${isMobile ? "20px" : "14px"};
+      height: ${isMobile ? "20px" : "14px"};
+      ${isMobile ? `
+        border: 2px solid var(--color-notice, #72777d);
+        border-radius: 50%;
+        position: relative;
+        flex-shrink: 0;
+      ` : ""}
+    }
+    
+    /* Radio checked state */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon {
+      border-color: var(--color-progressive, #36c);
+    }
+    
+    ${isMobile ? `
+      /* Mobile-specific checked state */
+      #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon:after,
+      #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon:after {
+        content: '';
+        position: absolute;
+        width: 10px;
+        height: 10px;
+        background: var(--color-progressive, #36c);
+        border-radius: 50%;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+      }
       
+      /* Mobile text styles */
+      #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__label-content,
+      #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__label-content {
+        color: var(--color-base, #202122);
+        font-size: 14px;
+      }
+    ` : ""}
+    
+    /* Label content checked state */
+    #n-malayscriptconverter.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input:checked ~ .cdx-radio__label-content,
+    #n-ui-language.${CONFIG.UI.NAMESPACE_CLASS} .cdx-radio__input:checked ~ .cdx-radio__label-content {
+      color: var(--color-progressive, #36c);
+      font-weight: ${isMobile ? "500" : "bold"};
+    }
+  `;
+
       const styleElement = document.createElement("style");
       styleElement.id = "rumi-jawi-styles";
       styleElement.textContent = css;
@@ -564,19 +575,19 @@
       let html = `<div class="cdx-field"><label class="cdx-label cdx-label--title">
         <span class="cdx-label__text convertible-text" data-rumi="${title}">${title}</span>
         </label><div class="cdx-radio--inline" role="radiogroup" aria-label="${title}">`;
-      
+
       options.forEach(option => {
         const labelContent = option.isCode ?
           `<span class="cdx-radio__label-content">${option.label}</span>` :
           `<span class="cdx-radio__label-content convertible-text" data-rumi="${option.label}">${option.label}</span>`;
-        
+
         html += `<div class="cdx-radio__content"><label class="cdx-radio__label">
           <input type="radio" class="cdx-radio__input" name="${name}" value="${option.value}" 
             ${option.checked ? "checked" : ""} aria-checked="${option.checked}">
           <span class="cdx-radio__icon"></span>${labelContent}
           </label></div>`;
       });
-      
+
       html += "</div></div>";
       return html;
     },
@@ -587,21 +598,22 @@
         console.log(`Unsupported skin: ${skin}, no UI will be shown`);
         return;
       }
-      
+
       const isMobile = skin === "minerva";
       const container = isMobile ?
         document.querySelector(".menu") :
         document.querySelector("#vector-pinned-container ul, #p-navigation ul");
-      
+
       if (!container) {
         console.error(`Navigation container not found for ${skin} skin`);
         return;
       }
-      
-      document.querySelectorAll("#ca-nstab-rkj, #ca-ui-language").forEach(el => el.remove());
-      
+
+      document.querySelectorAll("#n-malayscriptconverter, #n-ui-language").forEach(el => el.remove());
+
       const scriptLi = document.createElement("li");
-      scriptLi.id = "ca-nstab-rkj";
+      scriptLi.id = "n-malayscriptconverter";
+      scriptLi.className = CONFIG.UI.NAMESPACE_CLASS;
       scriptLi.innerHTML = this.createControlsHTML("rumi-jawi", "Penukar tulisan", [{
           value: "rumi",
           label: "Rumi",
@@ -613,10 +625,11 @@
           checked: State.script === "jawi"
         }
       ]);
-      
+
       const currentLanguage = mw.config.get("wgUserLanguage");
       const langLi = document.createElement("li");
-      langLi.id = "ca-ui-language";
+      langLi.id = "n-ui-language";
+      langLi.className = CONFIG.UI.NAMESPACE_CLASS;
       langLi.innerHTML = this.createControlsHTML("ui-language", "Penukar antara muka", [{
           value: "rumi-ui",
           label: "ms-latn",
@@ -630,7 +643,7 @@
           isCode: true
         }
       ]);
-      
+
       if (isMobile) {
         let menuContainer = container.querySelector(".converter-container");
         if (!menuContainer) {
@@ -644,7 +657,7 @@
         container.appendChild(scriptLi);
         container.appendChild(langLi);
       }
-      
+
       this.setupEventHandlers();
     },
 
@@ -653,25 +666,25 @@
         radio.addEventListener("change", async function() {
           const isJawi = this.value === "jawi";
           State.setScript(isJawi ? "jawi" : "rumi");
-          
+
           document.querySelectorAll(".cdx-radio__input[name=\"rumi-jawi\"]").forEach(input => {
             input.setAttribute("aria-checked", input.checked.toString());
           });
-          
+
           try {
             if (!State.dictionary) {
               State.dictionary = await DictionaryManager.fetch();
             }
-            
+
             document.querySelectorAll(".convertible-text").forEach(element => {
               const rumiText = element.getAttribute("data-rumi");
               element.textContent = isJawi ? Converter.convertText(rumiText, State.dictionary) : rumiText;
             });
-            
+
             await Converter.convert(isJawi);
           } catch (error) {
             console.error("Conversion error:", error);
-            
+
             const previousState = isJawi ? "rumi" : "jawi";
             State.setScript(previousState);
             const prevRadio = document.querySelector(`input[value="${previousState}"]`);
@@ -682,7 +695,7 @@
           }
         });
       });
-      
+
       document.querySelectorAll(".cdx-radio__input[name=\"ui-language\"]").forEach(radio => {
         radio.addEventListener("change", async function() {
           const language = this.value === "jawi-ui" ? "ms-arab" : "ms";
@@ -707,51 +720,54 @@
     }
   };
 
-  function initializeElements() {
-    const elements = {
-      content: document.querySelector("#mw-content-text"),
-      title: document.querySelector(".mw-first-heading")
-    };
+  function checkPageContext() {
+    return (
+      typeof mw.config.get("wgNamespaceNumber") !== "undefined" &&
+      !["edit", "submit"].includes(mw.config.get("wgAction")) &&
+      !document.querySelector(".ve-active, .wikiEditor-ui") &&
+      !mw.config.get("wgVisualEditor")?.isActive
+    );
+  }
 
-    if (!elements.content || !elements.title) {
+  function getRequiredElements() {
+    const contentElement = document.querySelector("#mw-content-text");
+    const titleElement = document.querySelector(".mw-first-heading");
+
+    if (!contentElement || !titleElement) {
       throw new Error("Required content elements not found");
     }
 
-    return elements;
+    return {
+      content: contentElement,
+      title: titleElement
+    };
   }
 
-  function isValidContext() {
-    if (mw.config.get("wgNamespaceNumber") === undefined) return false;
-    if (mw.config.get("wgAction") === "edit" || mw.config.get("wgAction") === "submit" ||
-        document.querySelector(".ve-active, .wikiEditor-ui") !== null ||
-        mw.config.get("wgVisualEditor")?.isActive === true) {
-      return false;
+  function initializeApp() {
+    if (State.initialized || !checkPageContext()) {
+      return;
     }
-    return true;
-  }
-
-  function initialize() {
-    if (State.initialized || !isValidContext()) return;
 
     try {
-      const elements = initializeElements();
-      if (!elements) return;
-
-      State.init(elements.content, elements.title);
+      State.init(...Object.values(getRequiredElements()));
       UIManager.initialize();
       TemplateManager.initialize();
-      
+
       State.initialized = true;
-      if (CONFIG.APP.DEBUG) console.log("Initialized successfully");
+      CONFIG.APP.DEBUG && console.log("Initialized successfully");
     } catch (error) {
       console.error("Initialization failed:", error);
     }
   }
 
-  mw.hook("wikipage.content").add(() => initialize());
-  if (document.readyState !== "loading") {
-    setTimeout(initialize, 0);
+  // Initialize on dynamic content updates
+  mw.hook("wikipage.content").add(initializeApp);
+
+  // Initialize on page load
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeApp);
   } else {
-    document.addEventListener("DOMContentLoaded", initialize);
+    requestAnimationFrame(initializeApp);
   }
+
 })();
