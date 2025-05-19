@@ -4,7 +4,7 @@
  **
  **/
 
-/* Convert the text from rumi to jawi script */
+/* Convert the text from rumi to jawi script through dictionary data in JSON format stored in GitHub */
 
 /* Original author: [[Pengguna:Hakimi97]] */
 
