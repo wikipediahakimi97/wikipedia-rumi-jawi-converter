@@ -4,7 +4,7 @@
  **
  **/
 
-/* Convert the text from rumi to jawi script */
+/* Convert the text from rumi to jawi script through dictionary data which is directly fetched from WDQS */
 
 /* Original author: [[Pengguna:Hakimi97]] */
 
