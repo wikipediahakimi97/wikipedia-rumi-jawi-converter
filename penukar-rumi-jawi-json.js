@@ -25,7 +25,11 @@
     },
     // API endpoints
     API: {
-      URL: "https://raw.githubusercontent.com/wikipediahakimi97/wikipedia-rumi-jawi-converter/refs/heads/main/WDQSMalayLexeme.json"
+      URLS: [
+        "https://raw.githubusercontent.com/wikipediahakimi97/wikipedia-rumi-jawi-converter/main/WDQSMalayLexeme.json",
+        "https://raw.githubusercontent.com/wikipediahakimi97/wikipedia-rumi-jawi-converter/refs/heads/main/WDQSMalayLexeme.json"
+      ],
+      TIMEOUT: 30000
     },
     // UI related constants
     UI: {
@@ -97,42 +101,54 @@
     },
 
     async fetchFromAPI() {
-      try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
-        const response = await fetch(CONFIG.API.URL, {
-          headers: {
-            Accept: "application/json",
-            "User-Agent": "RumiJawiConverter/1.0"
-          },
-          signal: controller.signal
-        });
-        clearTimeout(timeoutId);
-
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-
-        const result = await response.json();
-        const processedData = this.process(result);
-
+      for (const url of CONFIG.API.URLS) {
         try {
-          localStorage.setItem(CONFIG.APP.CACHE_KEY, JSON.stringify({
-            timestamp: Date.now(),
-            data: processedData
-          }));
-        } catch (e) {
-          console.warn("Error storing in localStorage:", e);
-        }
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), CONFIG.API.TIMEOUT);
+          
+          console.log(`Attempting to fetch from: ${url}`);
+          const response = await fetch(url, {
+            headers: {
+              Accept: "application/json",
+              "User-Agent": "RumiJawiConverter/1.0"
+            },
+            signal: controller.signal
+          });
+          clearTimeout(timeoutId);
 
-        return processedData;
-      } catch (error) {
-        console.error("Error fetching Rumi-Jawi data:", error);
-        return {
-          words: {},
-          phrases: {},
-          forms: {},
-          formMappings: {}
-        };
+          if (!response.ok) {
+            console.warn(`HTTP error from ${url}: ${response.status}`);
+            continue;
+          }
+
+          const result = await response.json();
+          console.log("Data retrieved successfully, format:", result.hasOwnProperty('results') ? 'SPARQL' : 'Direct JSON');
+          
+          const processedData = this.process(result);
+          console.log("Processed entries:", Object.keys(processedData.words).length);
+
+          try {
+            localStorage.setItem(CONFIG.APP.CACHE_KEY, JSON.stringify({
+              timestamp: Date.now(),
+              data: processedData
+            }));
+          } catch (e) {
+            console.warn("Error storing in localStorage:", e);
+          }
+
+          return processedData;
+        } catch (error) {
+          console.warn(`Error fetching from ${url}:`, error);
+        }
       }
+
+      console.error("All URLs failed, returning empty dictionary");
+      return {
+        words: {},
+        phrases: {},
+        forms: {},
+        formMappings: {}
+      };
     },
 
     process(data) {
@@ -143,22 +159,36 @@
         formMappings: {}
       };
 
-      data.results.bindings.forEach(({
-        formId,
-        latn,
-        arab
-      }) => {
-        const rumiText = latn.value.toLowerCase();
-        const jawiText = arab.value;
-        const formIdValue = formId.value;
+      // Handle both SPARQL results format and direct JSON format
+      const entries = data.results ? data.results.bindings : data;
+      
+      if (!Array.isArray(entries)) {
+        console.error("Unexpected data format:", data);
+        return dictionary;
+      }
 
-        dictionary.forms[formIdValue] = jawiText;
-        dictionary.formMappings[formIdValue] = rumiText;
+      entries.forEach(entry => {
+        try {
+          // Handle both formats of data structure
+          const formId = entry.formId?.value || entry.formId;
+          const rumiText = (entry.latn?.value || entry.latn || "").toLowerCase();
+          const jawiText = entry.arab?.value || entry.arab;
 
-        if (rumiText.includes(" ")) {
-          dictionary.phrases[rumiText] = formIdValue;
-        } else {
-          dictionary.words[rumiText] = formIdValue;
+          if (!formId || !rumiText || !jawiText) {
+            console.warn("Skipping invalid entry:", entry);
+            return;
+          }
+
+          dictionary.forms[formId] = jawiText;
+          dictionary.formMappings[formId] = rumiText;
+
+          if (rumiText.includes(" ")) {
+            dictionary.phrases[rumiText] = formId;
+          } else {
+            dictionary.words[rumiText] = formId;
+          }
+        } catch (e) {
+          console.warn("Error processing entry:", entry, e);
         }
       });
 
