@@ -53,20 +53,14 @@
   // --- Utility functions for safe DOM manipulation ---
   function safeSetInnerHTML(element, content) {
     if (typeof content === 'string' && content.includes('<')) {
-      // Create a safe container and parse the content
       const tempDiv = document.createElement('div');
       tempDiv.innerHTML = content;
-      
-      // Clear the element and append parsed content
       element.innerHTML = '';
-      while (tempDiv.firstChild) {
-        element.appendChild(tempDiv.firstChild);
-      }
+      while (tempDiv.firstChild) element.appendChild(tempDiv.firstChild);
     } else {
       element.textContent = content;
     }
   }
-
   function safeSetTextContent(element, content) {
     element.textContent = content;
   }
@@ -116,22 +110,16 @@
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000);
-        
-        // Use MediaWiki's standard approach for external API calls
         const response = await fetch(
           `${SPARQL_URL}?query=${encodeURIComponent(SPARQL_QUERY)}&format=json`, {
-            headers: {
-              Accept: "application/sparql-results+json"
-            },
+            headers: { Accept: "application/sparql-results+json" },
             signal: controller.signal
           }
         );
         clearTimeout(timeoutId);
-        
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         const processedData = this.process(result);
-        
         try {
           if (typeof Storage !== 'undefined') {
             localStorage.setItem(CACHE_KEY, JSON.stringify({
@@ -150,13 +138,9 @@
     },
     process(data) {
       const dictionary = { words: {}, phrases: {}, forms: {}, formMappings: {} };
-      if (!data || !data.results || !data.results.bindings) {
-        return dictionary;
-      }
-      
+      if (!data?.results?.bindings) return dictionary;
       data.results.bindings.forEach(({ formId, latn, arab }) => {
         if (!formId || !latn || !arab) return;
-        
         const rumiText = latn.value.toLowerCase();
         const jawiText = arab.value;
         const formIdValue = formId.value;
@@ -171,324 +155,249 @@
   // --- Converter core ---
   const Converter = {
     async convert(toJawi) {
-      try {
-        if (!State.dictionary) State.dictionary = await DictionaryManager.fetch();
-        TemplateManager.collectOverrides();
-        TemplateManager.convert(toJawi);
-        
-        // Process convertible text elements with error handling
-        document.querySelectorAll('.convertible-text').forEach(element => {
-          try {
-            const rumiText = element.getAttribute('data-rumi');
-            if (rumiText) {
-              let newText = toJawi ?
-                this.convertText(rumiText, State.dictionary) :
-                rumiText;
-              if (toJawi) newText = replaceHamzaWithSpan(newText);
-              safeSetInnerHTML(element, newText);
-              this.setRTLDirection(element, toJawi);
-            }
-          } catch (e) {
-            console.error("Error processing convertible text:", e);
+      if (!State.dictionary) State.dictionary = await DictionaryManager.fetch();
+      TemplateManager.collectOverrides();
+      TemplateManager.convert(toJawi);
+
+      // Cache NodeLists to avoid repeated queries
+      const convertible = document.querySelectorAll('.convertible-text');
+      const toc = document.querySelectorAll('.vector-toc-text');
+      convertible.forEach(element => {
+        const rumiText = element.getAttribute('data-rumi');
+        if (rumiText) {
+          let newText = toJawi ? this.convertText(rumiText, State.dictionary) : rumiText;
+          if (toJawi) newText = replaceHamzaWithSpan(newText);
+          safeSetInnerHTML(element, newText);
+          this.setRTLDirection(element, toJawi);
+        }
+      });
+      toc.forEach(element => {
+        if (!element.hasAttribute('data-rumi')) element.setAttribute('data-rumi', element.textContent);
+        const rumiText = element.getAttribute('data-rumi');
+        let newText = toJawi ? this.convertText(rumiText, State.dictionary) : rumiText;
+        if (toJawi) newText = replaceHamzaWithSpan(newText);
+        safeSetInnerHTML(element, newText);
+        this.setRTLDirection(element, toJawi);
+      });
+
+      if (toJawi) {
+        await this.convertToJawi();
+        const templateNodes = document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`);
+        templateNodes.forEach(element => safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent)));
+        // Global hamza conversion
+        document.querySelectorAll("*:not(script):not(style)").forEach(el => {
+          if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE && el.textContent.includes("ء")) {
+            safeSetInnerHTML(el, replaceHamzaWithSpan(el.textContent));
           }
         });
-        
-        if (toJawi) {
-          await this.convertToJawi();
-          document.querySelectorAll(
-            `.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`
-          ).forEach(element => {
-            try {
-              safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent));
-            } catch (e) {
-              console.error("Error processing template/noconvert element:", e);
-            }
-          });
-
-          // --- Apply three quarter hamza conversion globally ---
-          try {
-            // Select all elements containing the Arabic hamza character
-            document.querySelectorAll("*:not(script):not(style)").forEach(el => {
-              // Only process elements with text containing hamza
-              if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE && el.textContent.includes("ء")) {
-                safeSetInnerHTML(el, replaceHamzaWithSpan(el.textContent));
-              }
-            });
-          } catch (e) {
-            console.error("Error in global hamza conversion:", e);
-          }
-        } else {
-          this.revertToRumi();
-        }
-      } catch (error) {
-        console.error("Error in convert function:", error);
+      } else {
+        this.revertToRumi();
       }
     },
     async convertToJawi() {
-      try {
-        if (!State.originalContent) {
-          State.originalContent = State.content.innerHTML;
-          State.originalTitle = State.title.textContent;
-        }
-        this.setRTLDirection(State.content, true);
-        this.setRTLDirection(State.title, true);
-        safeSetInnerHTML(State.title, replaceHamzaWithSpan(this.convertText(State.title.textContent, State.dictionary)));
-        
-        const walker = document.createTreeWalker(
-          State.content,
-          NodeFilter.SHOW_TEXT, {
-            acceptNode: node => {
-              const parent = node.parentElement;
-              if (!parent) return NodeFilter.FILTER_REJECT;
-              if (
-                parent.tagName === "SCRIPT" ||
-                parent.tagName === "STYLE" ||
-                parent.classList.contains(UI.NOCONVERT_CLASS) ||
-                parent.classList.contains(UI.TEMPLATE_CLASS) ||
-                parent.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header")
-              ) {
-                return NodeFilter.FILTER_REJECT;
-              }
-              return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-            }
-          }
-        );
-        
-        const textNodes = [];
-        let node;
-        while ((node = walker.nextNode())) textNodes.push(node);
-        
-        let currentIndex = 0;
-        const chunkSize = 50;
-        const processNextChunk = () => {
-          try {
-            const endIndex = Math.min(currentIndex + chunkSize, textNodes.length);
-            for (let i = currentIndex; i < endIndex; i++) {
-              const textNode = textNodes[i];
-              if (textNode && textNode.textContent && textNode.textContent.trim()) {
-                let converted = this.convertText(textNode.textContent, State.dictionary);
-                converted = replaceHamzaWithSpan(converted);
-                if (converted !== textNode.textContent && /<span[^>]*>ء<\/span>/.test(converted)) {
-                  const span = document.createElement("span");
-                  safeSetInnerHTML(span, converted);
-                  if (textNode.parentNode) {
-                    textNode.parentNode.replaceChild(span, textNode);
-                  }
-                } else {
-                  textNode.textContent = converted;
-                }
-                let parent = textNode.parentElement;
-                while (parent && !parent.classList.contains("mw-content-text")) {
-                  if (
-                    parent.nodeType === 1 &&
-                    !parent.classList.contains(UI.NOCONVERT_CLASS) &&
-                    parent.closest("#mw-content-text")
-                  ) {
-                    this.setRTLDirection(parent, true);
-                  }
-                  parent = parent.parentElement;
-                }
-              }
-            }
-            currentIndex = endIndex;
-            if (currentIndex < textNodes.length) requestAnimationFrame(processNextChunk);
-          } catch (e) {
-            console.error("Error in processNextChunk:", e);
-          }
-        };
-        requestAnimationFrame(processNextChunk);
-
-        document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`).forEach(element => {
-          try {
-            safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent));
-          } catch (e) {
-            console.error("Error processing template element:", e);
-          }
-        });
-      } catch (error) {
-        console.error("Error in convertToJawi:", error);
+      if (!State.originalContent) {
+        State.originalContent = State.content.innerHTML;
+        State.originalTitle = State.title.textContent;
       }
+      this.setRTLDirection(State.content, true);
+      this.setRTLDirection(State.title, true);
+      safeSetInnerHTML(State.title, replaceHamzaWithSpan(this.convertText(State.title.textContent, State.dictionary)));
+
+      const walker = document.createTreeWalker(
+        State.content,
+        NodeFilter.SHOW_TEXT, {
+          acceptNode: node => {
+            const parent = node.parentElement;
+            if (!parent) return NodeFilter.FILTER_REJECT;
+            if (
+              parent.tagName === "SCRIPT" ||
+              parent.tagName === "STYLE" ||
+              parent.classList.contains(UI.NOCONVERT_CLASS) ||
+              parent.classList.contains(UI.TEMPLATE_CLASS) ||
+              parent.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header")
+            ) return NodeFilter.FILTER_REJECT;
+            return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+          }
+        }
+      );
+      const textNodes = [];
+      let node;
+      while ((node = walker.nextNode())) textNodes.push(node);
+
+      let currentIndex = 0, chunkSize = 50;
+      const processNextChunk = () => {
+        const endIndex = Math.min(currentIndex + chunkSize, textNodes.length);
+        for (let i = currentIndex; i < endIndex; i++) {
+          const textNode = textNodes[i];
+          if (textNode && textNode.textContent && textNode.textContent.trim()) {
+            let converted = this.convertText(textNode.textContent, State.dictionary);
+            converted = replaceHamzaWithSpan(converted);
+            if (converted !== textNode.textContent && /<span[^>]*>ء<\/span>/.test(converted)) {
+              const span = document.createElement("span");
+              safeSetInnerHTML(span, converted);
+              if (textNode.parentNode) textNode.parentNode.replaceChild(span, textNode);
+            } else {
+              textNode.textContent = converted;
+            }
+            let parent = textNode.parentElement;
+            while (parent && !parent.classList.contains("mw-content-text")) {
+              if (
+                parent.nodeType === 1 &&
+                !parent.classList.contains(UI.NOCONVERT_CLASS) &&
+                parent.closest("#mw-content-text")
+              ) this.setRTLDirection(parent, true);
+              parent = parent.parentElement;
+            }
+          }
+        }
+        currentIndex = endIndex;
+        if (currentIndex < textNodes.length) requestAnimationFrame(processNextChunk);
+      };
+      requestAnimationFrame(processNextChunk);
+
+      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`)
+        .forEach(element => safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent)));
     },
     revertToRumi() {
-      try {
-        if (State.originalContent) {
-          State.content.innerHTML = State.originalContent;
-          safeSetTextContent(State.title, State.originalTitle);
-          this.setRTLDirection(State.content, false);
-          this.setRTLDirection(State.title, false);
-          State.content.querySelectorAll("[dir=\"rtl\"]").forEach(el => {
-            el.removeAttribute("dir");
-            el.removeAttribute("lang");
-          });
-          State.originalContent = null;
-          State.originalTitle = null;
-        }
-      } catch (error) {
-        console.error("Error in revertToRumi:", error);
+      if (State.originalContent) {
+        State.content.innerHTML = State.originalContent;
+        safeSetTextContent(State.title, State.originalTitle);
+        this.setRTLDirection(State.content, false);
+        this.setRTLDirection(State.title, false);
+        State.content.querySelectorAll("[dir=\"rtl\"]").forEach(el => {
+          el.removeAttribute("dir");
+          el.removeAttribute("lang");
+        });
+        State.originalContent = null;
+        State.originalTitle = null;
       }
     },
     convertText(text, dict) {
       if (!text?.trim() || !dict) return text;
-      try {
-        const numbers = [];
-        let result = text.replace(/\d+(?:[,.]\d+)*(?:\.\d+)?%?/g, match => {
-          const placeholder = `__NUM${numbers.push(`\u2066${match}\u2069`) - 1}__`;
-          return placeholder;
+      const numbers = [];
+      let result = text.replace(/\d+(?:[,.]\d+)*(?:\.\d+)?%?/g, match => {
+        const placeholder = `__NUM${numbers.push(`\u2066${match}\u2069`) - 1}__`;
+        return placeholder;
+      });
+      // Phrases
+      const sortedPhrases = Object.keys(dict.phrases).sort((a, b) => b.length - a.length);
+      if (sortedPhrases.length) {
+        const phraseRegex = new RegExp(
+          sortedPhrases.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
+          "gi"
+        );
+        result = result.replace(phraseRegex, match => {
+          const formId = dict.phrases[match.toLowerCase()];
+          return formId ? dict.forms[formId] : match;
         });
-        
-        // Only used by template manager
-        if (State.templateOverrides.size > 0 && false) { }
-        const sortedPhrases = Object.keys(dict.phrases).sort((a, b) => b.length - a.length);
-        if (sortedPhrases.length > 0) {
-          const phraseRegex = new RegExp(
-            sortedPhrases.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
-            "gi"
-          );
-          result = result.replace(phraseRegex, match => {
-            const formId = dict.phrases[match.toLowerCase()];
-            return formId ? dict.forms[formId] : match;
-          });
-        }
-        const apostropheWords = Object.keys(dict.words)
-          .filter(word => word.includes("'"))
-          .sort((a, b) => b.length - a.length);
-        if (apostropheWords.length > 0) {
-          const apostropheRegex = new RegExp(
-            apostropheWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
-            "gi"
-          );
-          result = result.replace(apostropheRegex, match => {
-            const formId = dict.words[match.toLowerCase()];
-            return formId ? dict.forms[formId] : match;
-          });
-        }
-        result = result.replace(/\b\w+(?:-\w+)+\b/g, match => {
-          const formId = dict.words[match.toLowerCase()];
-          if (formId) return dict.forms[formId];
-          return match.split("-")
-            .map(part => {
-              const partFormId = dict.words[part.toLowerCase()];
-              return partFormId ? dict.forms[partFormId] : part;
-            })
-            .join("-");
-        });
-        result = result.replace(/\b[a-zA-Z\u00C0-\u024F0-9_]+\b/g, match => {
+      }
+      // Apostrophe words
+      const apostropheWords = Object.keys(dict.words).filter(word => word.includes("'")).sort((a, b) => b.length - a.length);
+      if (apostropheWords.length) {
+        const apostropheRegex = new RegExp(
+          apostropheWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
+          "gi"
+        );
+        result = result.replace(apostropheRegex, match => {
           const formId = dict.words[match.toLowerCase()];
           return formId ? dict.forms[formId] : match;
         });
-        result = result.replace(/(^|[\s]+)([کد])[\s]+(\S)/g, (match, spaceBefore, letter, nextChar) => {
-          const processedNextChar = nextChar === "ا" ? "أ" : nextChar;
-          return `${spaceBefore}${letter}${processedNextChar}`;
-        });
-        result = result.replace(/[,;?]/g, match =>
-          PUNCTUATION_MAP[match] || match
-        );
-        numbers.forEach((number, index) => {
-          result = result.replace(`__NUM${index}__`, number);
-        });
-        return result;
-      } catch (error) {
-        console.error("Error in convertText:", error);
-        return text;
       }
+      // Hyphenated words
+      result = result.replace(/\b\w+(?:-\w+)+\b/g, match => {
+        const formId = dict.words[match.toLowerCase()];
+        if (formId) return dict.forms[formId];
+        return match.split("-").map(part => {
+          const partFormId = dict.words[part.toLowerCase()];
+          return partFormId ? dict.forms[partFormId] : part;
+        }).join("-");
+      });
+      // Single words
+      result = result.replace(/\b[a-zA-Z\u00C0-\u024F0-9_]+\b/g, match => {
+        const formId = dict.words[match.toLowerCase()];
+        return formId ? dict.forms[formId] : match;
+      });
+      // Special replacements
+      result = result.replace(/(^|[\s]+)([کد])[\s]+(\S)/g, (match, spaceBefore, letter, nextChar) => {
+        const processedNextChar = nextChar === "ا" ? "أ" : nextChar;
+        return `${spaceBefore}${letter}${processedNextChar}`;
+      });
+      result = result.replace(/[,;?]/g, match => PUNCTUATION_MAP[match] || match);
+      numbers.forEach((number, index) => {
+        result = result.replace(`__NUM${index}__`, number);
+      });
+      return result;
     },
     setRTLDirection(element, isRTL) {
       if (!element) return;
-      try {
-        element.setAttribute("dir", isRTL ? "rtl" : "ltr");
-        element.setAttribute("lang", isRTL ? "ms-arab" : "ms");
-      } catch (error) {
-        console.error("Error setting RTL direction:", error);
-      }
+      element.setAttribute("dir", isRTL ? "rtl" : "ltr");
+      element.setAttribute("lang", isRTL ? "ms-arab" : "ms");
     }
   };
 
   // --- Template manager ---
   const TemplateManager = {
     collectOverrides() {
-      try {
-        State.templateOverrides.clear();
-        document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(element => {
-          const rumiText = element.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)?.toLowerCase();
-          const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
-          if (rumiText && formId) {
-            State.templateOverrides.set(rumiText, { formId });
-          }
-        });
-      } catch (error) {
-        console.error("Error collecting overrides:", error);
-      }
+      State.templateOverrides.clear();
+      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(element => {
+        const rumiText = element.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)?.toLowerCase();
+        const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
+        if (rumiText && formId) State.templateOverrides.set(rumiText, { formId });
+      });
     },
     convert(toJawi) {
-      try {
-        document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(element => {
-          try {
-            const rumiText = element.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR);
-            const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
-            if (!this.validateFormMapping(formId, rumiText, State.dictionary)) {
-              element.classList.add(UI.NOCONVERT_CLASS);
-              element.classList.remove(UI.TEMPLATE_CLASS);
-              return;
-            }
-            let newText = toJawi ? State.dictionary.forms[formId] || rumiText : rumiText;
-            if (toJawi) newText = replaceHamzaWithSpan(newText);
-            if (element.innerHTML !== newText) {
-              safeSetInnerHTML(element, newText);
-              Converter.setRTLDirection(element, toJawi);
-            }
-          } catch (e) {
-            console.error("Error processing template element:", e);
-          }
-        });
-        if (toJawi) {
-          document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).forEach(element => {
-            try {
-              safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent));
-            } catch (e) {
-              console.error("Error processing no-convert element:", e);
-            }
-          });
+      const templates = document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`);
+      templates.forEach(element => {
+        const rumiText = element.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR);
+        const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
+        if (!this.validateFormMapping(formId, rumiText, State.dictionary)) {
+          element.classList.add(UI.NOCONVERT_CLASS);
+          element.classList.remove(UI.TEMPLATE_CLASS);
+          return;
         }
-      } catch (error) {
-        console.error("Error in template convert:", error);
+        let newText = toJawi ? State.dictionary.forms[formId] || rumiText : rumiText;
+        if (toJawi) newText = replaceHamzaWithSpan(newText);
+        if (element.innerHTML !== newText) {
+          safeSetInnerHTML(element, newText);
+          Converter.setRTLDirection(element, toJawi);
+        }
+      });
+      if (toJawi) {
+        document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).forEach(element =>
+          safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent))
+        );
       }
     },
     validateFormMapping(formId, rumiText, dict) {
-      if (!formId || !rumiText || !dict || !dict.formMappings || !dict.formMappings[formId]) return false;
-      return dict.formMappings[formId].toLowerCase() === rumiText.toLowerCase();
+      return !!(formId && rumiText && dict?.formMappings?.[formId] && dict.formMappings[formId].toLowerCase() === rumiText.toLowerCase());
     },
     initialize() {
-      try {
-        document.querySelectorAll("[data-form-id]").forEach(element => {
-          if (element.classList.contains(UI.TEMPLATE_CLASS)) return;
-          const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
-          if (!formId) return;
-          if (!element.hasAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)) {
-            element.setAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR, element.textContent);
-          }
-          element.classList.add(UI.TEMPLATE_CLASS);
-        });
-        document.querySelectorAll("[data-no-convert]").forEach(element => {
-          element.classList.add(UI.NOCONVERT_CLASS);
-        });
-        DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).length} form templates`);
-        DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).length} no-convert templates`);
-      } catch (error) {
-        console.error("Error in template initialize:", error);
-      }
+      document.querySelectorAll("[data-form-id]").forEach(element => {
+        if (element.classList.contains(UI.TEMPLATE_CLASS)) return;
+        const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
+        if (!formId) return;
+        if (!element.hasAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)) {
+          element.setAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR, element.textContent);
+        }
+        element.classList.add(UI.TEMPLATE_CLASS);
+      });
+      document.querySelectorAll("[data-no-convert]").forEach(element => {
+        element.classList.add(UI.NOCONVERT_CLASS);
+      });
+      DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).length} form templates`);
+      DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).length} no-convert templates`);
     }
   };
 
   // --- UI manager ---
   const UIManager = {
     setupStyles() {
-      try {
-        const existingStyles = document.getElementById("rumi-jawi-styles");
-        if (existingStyles) existingStyles.remove();
-        const skin = mw.config.get("skin");
-        const isMobile = skin === "minerva";
-        const isMonobook = skin === "monobook";
-        const css = `
+      const existingStyles = document.getElementById("rumi-jawi-styles");
+      if (existingStyles) existingStyles.remove();
+      const skin = mw.config.get("skin");
+      const isMobile = skin === "minerva";
+      const isMonobook = skin === "monobook";
+      const css = `
       /* Use more specific selectors with a unique namespace */
       /* Base styles for converter container */
       #n-malayscriptconverter.${UI.NAMESPACE_CLASS},
@@ -567,106 +476,82 @@
         color: var(--color-progressive, #36c);
       }
     `;
-        const styleElement = document.createElement("style");
-        styleElement.id = "rumi-jawi-styles";
-        styleElement.textContent = css;
-        document.head.appendChild(styleElement);
-      } catch (error) {
-        console.error("Error setting up styles:", error);
-      }
+      const styleElement = document.createElement("style");
+      styleElement.id = "rumi-jawi-styles";
+      styleElement.textContent = css;
+      document.head.appendChild(styleElement);
     },
     createControlsHTML(name, title, options) {
-      try {
-        let html = `<div class="cdx-field"><label class="cdx-label cdx-label--title">
-          <span class="cdx-label__text convertible-text" data-rumi="${title}">${title}</span>
-          </label><div class="cdx-radio--inline" role="radiogroup" aria-label="${title}">`;
-
-        options.forEach(option => {
-          html += `<div class="cdx-radio__content"><label class="cdx-radio__label">
-            <input type="radio" class="cdx-radio__input" name="${name}" value="${option.value}" 
-              ${option.checked ? "checked" : ""} aria-checked="${option.checked}">
-            <span class="cdx-radio__icon"></span>
-            <span class="cdx-radio__label-content convertible-text" data-rumi="${option.label}">${option.label}</span>
-            </label></div>`;
-        });
-
-        html += "</div></div>";
-        return html;
-      } catch (error) {
-        console.error("Error creating controls HTML:", error);
-        return "";
-      }
+      let html = `<div class="cdx-field"><label class="cdx-label cdx-label--title">
+        <span class="cdx-label__text convertible-text" data-rumi="${title}">${title}</span>
+        </label><div class="cdx-radio--inline" role="radiogroup" aria-label="${title}">`;
+      options.forEach(option => {
+        html += `<div class="cdx-radio__content"><label class="cdx-radio__label">
+          <input type="radio" class="cdx-radio__input" name="${name}" value="${option.value}" 
+            ${option.checked ? "checked" : ""} aria-checked="${option.checked}">
+          <span class="cdx-radio__icon"></span>
+          <span class="cdx-radio__label-content convertible-text" data-rumi="${option.label}">${option.label}</span>
+          </label></div>`;
+      });
+      html += "</div></div>";
+      return html;
     },
     setupControls() {
-      try {
-        const skin = mw.config.get("skin");
-        if (!UI.SUPPORTED_SKINS.includes(skin)) {
-          DEBUG && console.log(`Unsupported skin: ${skin}, no UI will be shown`);
-          return;
-        }
-        const isMobile = skin === "minerva";
-        const container = isMobile ?
-          document.querySelector(".menu") :
-          document.querySelector("#vector-pinned-container ul, #p-navigation ul");
-        if (!container) {
-          console.error(`Navigation container not found for ${skin} skin`);
-          return;
-        }
-        document.querySelectorAll("#n-malayscriptconverter, #n-ui-language").forEach(el => el.remove());
-        const scriptLi = document.createElement("li");
-        scriptLi.id = "n-malayscriptconverter";
-        scriptLi.className = UI.NAMESPACE_CLASS;
-        const currentLanguage = mw.config.get("wgUserLanguage");
-        const pendingScript = sessionStorage.getItem("pendingScript");
-        const options = [
-          {
-            value: "rumi-ui",
-            label: "Rumi",
-            checked: pendingScript ? pendingScript === "rumi" : (currentLanguage !== "ms-arab")
-          },
-          {
-            value: "jawi-ui",
-            label: "Jawi",
-            checked: pendingScript ? pendingScript === "jawi" : (currentLanguage === "ms-arab")
-          }
-        ];
-        safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-ui", "Paparan tulisan", options));
-        if (isMobile) {
-          let menuContainer = container.querySelector(".converter-container");
-          if (!menuContainer) {
-            menuContainer = document.createElement("div");
-            menuContainer.className = "converter-container";
-            container.appendChild(menuContainer);
-          }
-          menuContainer.appendChild(scriptLi);
-        } else {
-          container.appendChild(scriptLi);
-        }
-        this.setupEventHandlers();
-      } catch (error) {
-        console.error("Error setting up controls:", error);
+      const skin = mw.config.get("skin");
+      if (!UI.SUPPORTED_SKINS.includes(skin)) {
+        DEBUG && console.log(`Unsupported skin: ${skin}, no UI will be shown`);
+        return;
       }
+      const isMobile = skin === "minerva";
+      const container = isMobile ?
+        document.querySelector(".menu") :
+        document.querySelector("#vector-pinned-container ul, #p-navigation ul");
+      if (!container) {
+        console.error(`Navigation container not found for ${skin} skin`);
+        return;
+      }
+      document.querySelectorAll("#n-malayscriptconverter, #n-ui-language").forEach(el => el.remove());
+      const scriptLi = document.createElement("li");
+      scriptLi.id = "n-malayscriptconverter";
+      scriptLi.className = UI.NAMESPACE_CLASS;
+      const currentLanguage = mw.config.get("wgUserLanguage");
+      const pendingScript = sessionStorage.getItem("pendingScript");
+      const options = [
+        {
+          value: "rumi-ui",
+          label: "Rumi",
+          checked: pendingScript ? pendingScript === "rumi" : (currentLanguage !== "ms-arab")
+        },
+        {
+          value: "jawi-ui",
+          label: "Jawi",
+          checked: pendingScript ? pendingScript === "jawi" : (currentLanguage === "ms-arab")
+        }
+      ];
+      safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-ui", "Paparan tulisan", options));
+      if (isMobile) {
+        let menuContainer = container.querySelector(".converter-container");
+        if (!menuContainer) {
+          menuContainer = document.createElement("div");
+          menuContainer.className = "converter-container";
+          container.appendChild(menuContainer);
+        }
+        menuContainer.appendChild(scriptLi);
+      } else {
+        container.appendChild(scriptLi);
+      }
+      this.setupEventHandlers();
     },
     setupEventHandlers() {
-      try {
-        document.querySelectorAll(".cdx-radio__input[name=\"rumi-jawi-ui\"]").forEach(radio => {
-          radio.addEventListener("change", async function() {
-            try {
-              const isJawi = this.value === "jawi-ui";
-              const language = isJawi ? "ms-arab" : "ms";
-              if (typeof Storage !== 'undefined') {
-                sessionStorage.setItem("pendingScript", isJawi ? "jawi" : "rumi");
-              }
-              await UIManager.setUserLanguage(language);
-              window.location.reload();
-            } catch (error) {
-              console.error("Error in radio change handler:", error);
-            }
-          });
+      document.querySelectorAll(".cdx-radio__input[name=\"rumi-jawi-ui\"]").forEach(radio => {
+        radio.addEventListener("change", async function() {
+          const isJawi = this.value === "jawi-ui";
+          const language = isJawi ? "ms-arab" : "ms";
+          if (typeof Storage !== 'undefined') sessionStorage.setItem("pendingScript", isJawi ? "jawi" : "rumi");
+          await UIManager.setUserLanguage(language);
+          window.location.reload();
         });
-      } catch (error) {
-        console.error("Error setting up event handlers:", error);
-      }
+      });
     },
     async setUserLanguage(language) {
       try {
@@ -677,12 +562,8 @@
       }
     },
     initialize() {
-      try {
-        this.setupStyles();
-        this.setupControls();
-      } catch (error) {
-        console.error("Error initializing UI:", error);
-      }
+      this.setupStyles();
+      this.setupControls();
     }
   };
 
@@ -699,7 +580,7 @@
         text = text.replace(new RegExp(ex, "g"), key);
       });
       const hamzaSpan = '<span style="position: relative; bottom: 0.26em;">ء</span>';
-      forceCodaWords.forEach((word, i) => {
+      forceCodaWords.forEach(word => {
         const wordWithSpan = word.replace(/ء/g, hamzaSpan);
         text = text.replace(new RegExp(word, "g"), wordWithSpan);
       });
@@ -731,64 +612,46 @@
   const getRequiredElements = () => {
     const contentElement = document.querySelector("#mw-content-text");
     const titleElement = document.querySelector(".mw-first-heading");
-if (!contentElement || !titleElement) {
-     throw new Error("Required content elements not found");
-   }
-   return { content: contentElement, title: titleElement };
- };
+    if (!contentElement || !titleElement) throw new Error("Required content elements not found");
+    return { content: contentElement, title: titleElement };
+  };
 
- function setRadioChecked(value) {
-   try {
-     const radio = document.querySelector(`.cdx-radio__input[name="rumi-jawi-ui"][value="${value}"]`);
-     if (radio) radio.checked = true;
-   } catch (error) {
-     console.error("Error setting radio checked:", error);
-   }
- }
-
- async function initializeApp() {
-  if (State.initialized || !checkPageContext()) return;
-  try {
-    const { content, title } = getRequiredElements();
-    State.init(content, title);
-    UIManager.initialize();
-    TemplateManager.initialize();
-
-    // Start fetching dictionary and currentLanguage in parallel
-    const dictionaryPromise = DictionaryManager.fetch();
-    const currentLanguagePromise = Promise.resolve(mw.config.get("wgUserLanguage"));
-
-    // Wait for both to complete
-    const [dictionary, currentLanguage] = await Promise.all([dictionaryPromise, currentLanguagePromise]);
-    State.dictionary = dictionary;
-
-    // Now handle pendingScript logic
-    const pendingScript = (typeof Storage !== 'undefined') ? sessionStorage.getItem("pendingScript") : null;
-    const isJawi = currentLanguage === "ms-arab" || pendingScript === "jawi";
-    State.setScript(isJawi ? "jawi" : "rumi");
-    setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
-
-    if (isJawi) await Converter.convert(true);
-
-    if (pendingScript && typeof Storage !== 'undefined') {
-      sessionStorage.removeItem("pendingScript");
-    }
-
-    State.initialized = true;
-    DEBUG && console.log("Initialized successfully");
-  } catch (error) {
-    console.error("Initialization failed:", error);
+  function setRadioChecked(value) {
+    const radio = document.querySelector(`.cdx-radio__input[name="rumi-jawi-ui"][value="${value}"]`);
+    if (radio) radio.checked = true;
   }
- }
 
- // Use MediaWiki hooks for proper initialization
- if (typeof mw !== 'undefined' && mw.hook) {
-   mw.hook("wikipage.content").add(initializeApp);
- }
- 
- if (document.readyState === "loading") {
-   document.addEventListener("DOMContentLoaded", initializeApp);
- } else {
-   requestAnimationFrame(initializeApp);
- }
+  async function initializeApp() {
+    if (State.initialized || !checkPageContext()) return;
+    try {
+      const { content, title } = getRequiredElements();
+      State.init(content, title);
+      UIManager.initialize();
+      TemplateManager.initialize();
+      const [dictionary, currentLanguage] = await Promise.all([
+        DictionaryManager.fetch(),
+        Promise.resolve(mw.config.get("wgUserLanguage"))
+      ]);
+      State.dictionary = dictionary;
+      const pendingScript = (typeof Storage !== 'undefined') ? sessionStorage.getItem("pendingScript") : null;
+      const isJawi = currentLanguage === "ms-arab" || pendingScript === "jawi";
+      State.setScript(isJawi ? "jawi" : "rumi");
+      setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
+      if (isJawi) await Converter.convert(true);
+      if (pendingScript && typeof Storage !== 'undefined') sessionStorage.removeItem("pendingScript");
+      State.initialized = true;
+      DEBUG && console.log("Initialized successfully");
+    } catch (error) {
+      console.error("Initialization failed:", error);
+    }
+  }
+
+  if (typeof mw !== 'undefined' && mw.hook) {
+    mw.hook("wikipage.content").add(initializeApp);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initializeApp);
+  } else {
+    requestAnimationFrame(initializeApp);
+  }
 })();
