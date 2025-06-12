@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 2nd June 2025
+ ** Updated on 12th June 2025
  **
  **/
 
@@ -733,31 +733,39 @@ if (!contentElement || !titleElement) {
    }
  }
 
- function initializeApp() {
-   if (State.initialized || !checkPageContext()) return;
-   try {
-     const { content, title } = getRequiredElements();
-     State.init(content, title);
-     UIManager.initialize();
-     TemplateManager.initialize();
-     
-     const currentLanguage = mw.config.get("wgUserLanguage");
-     const pendingScript = typeof Storage !== 'undefined' ? sessionStorage.getItem("pendingScript") : null;
-     const isJawi = currentLanguage === "ms-arab" || pendingScript === "jawi";
-     State.setScript(isJawi ? "jawi" : "rumi");
-     setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
-     
-     if (isJawi) Converter.convert(true);
-     
-     if (pendingScript && typeof Storage !== 'undefined') {
-       sessionStorage.removeItem("pendingScript");
-     }
-     
-     State.initialized = true;
-     DEBUG && console.log("Initialized successfully");
-   } catch (error) {
-     console.error("Initialization failed:", error);
-   }
+ async function initializeApp() {
+  if (State.initialized || !checkPageContext()) return;
+  try {
+    const { content, title } = getRequiredElements();
+    State.init(content, title);
+    UIManager.initialize();
+    TemplateManager.initialize();
+
+    // Start fetching dictionary and currentLanguage in parallel
+    const dictionaryPromise = DictionaryManager.fetch();
+    const currentLanguagePromise = Promise.resolve(mw.config.get("wgUserLanguage"));
+
+    // Wait for both to complete
+    const [dictionary, currentLanguage] = await Promise.all([dictionaryPromise, currentLanguagePromise]);
+    State.dictionary = dictionary;
+
+    // Now handle pendingScript logic
+    const pendingScript = (typeof Storage !== 'undefined') ? sessionStorage.getItem("pendingScript") : null;
+    const isJawi = currentLanguage === "ms-arab" || pendingScript === "jawi";
+    State.setScript(isJawi ? "jawi" : "rumi");
+    setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
+
+    if (isJawi) await Converter.convert(true);
+
+    if (pendingScript && typeof Storage !== 'undefined') {
+      sessionStorage.removeItem("pendingScript");
+    }
+
+    State.initialized = true;
+    DEBUG && console.log("Initialized successfully");
+  } catch (error) {
+    console.error("Initialization failed:", error);
+  }
  }
 
  // Use MediaWiki hooks for proper initialization
