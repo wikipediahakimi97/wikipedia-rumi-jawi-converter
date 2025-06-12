@@ -204,6 +204,19 @@
               console.error("Error processing template/noconvert element:", e);
             }
           });
+
+          // --- Apply three quarter hamza conversion globally ---
+          try {
+            // Select all elements containing the Arabic hamza character
+            document.querySelectorAll("*:not(script):not(style)").forEach(el => {
+              // Only process elements with text containing hamza
+              if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE && el.textContent.includes("ء")) {
+                safeSetInnerHTML(el, replaceHamzaWithSpan(el.textContent));
+              }
+            });
+          } catch (e) {
+            console.error("Error in global hamza conversion:", e);
+          }
         } else {
           this.revertToRumi();
         }
