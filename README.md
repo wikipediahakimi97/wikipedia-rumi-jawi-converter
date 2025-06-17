@@ -1,4 +1,4 @@
-# MediaWiki Malay Latin script (ms-Latn) to Malay Arabic script (ms-Arab)
+# MediaWiki Malay Rumi script (ms-Latn) to Malay Jawi script (ms-Arab) converter
 Currently, four types of converters have been developed for the conversion of main text articles on Wikipedia (these can also be utilized for other Wikimedia-related projects):
 
 * penukar-rumi-jawi-aksara.js: Converts ms-Latn to ms-Arab on a letter-by-letter basis. While it offers the fastest conversion speed, its results are largely erroneous.
