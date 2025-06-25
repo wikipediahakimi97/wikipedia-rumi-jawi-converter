@@ -1,10 +1,13 @@
 /**
  ** LOG:
- ** Updated on 12th June 2025
+ ** Updated on 25th June 2025
  **
  **/
 
-/* Convert the text from rumi to jawi script using WDQS */
+/* Convert the text from rumi to jawi script using WDQS
+* With separated options. Penukar kandungan: Jawi/Rumi 
+*                         Penukar antara muka: Jawi/Rumi
+*/
 
 /* Original author: [[Pengguna:Hakimi97]] */
 
@@ -15,7 +18,7 @@
 */
 
 (() => {
-  // --- Utility constants and functions ---
+  // --- Utility constants ---
   const CACHE_KEY = "rumiJawiData";
   const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
   const DEBUG = false;
@@ -50,7 +53,7 @@
 
   const PUNCTUATION_MAP = { ",": "⹁", ";": "⁏", "?": "؟" };
 
-  // --- Utility functions for safe DOM manipulation ---
+  // --- Utility functions ---
   function safeSetInnerHTML(element, content) {
     if (typeof content === 'string' && content.includes('<')) {
       const tempDiv = document.createElement('div');
@@ -63,6 +66,11 @@
   }
   function safeSetTextContent(element, content) {
     element.textContent = content;
+  }
+  function setRadioChecked(value) {
+    document.querySelectorAll(`.cdx-radio__input[value="${value}"]`).forEach(radio => {
+      radio.checked = true;
+    });
   }
 
   // --- State management ---
@@ -159,7 +167,6 @@
       TemplateManager.collectOverrides();
       TemplateManager.convert(toJawi);
 
-      // Cache NodeLists to avoid repeated queries
       const convertible = document.querySelectorAll('.convertible-text');
       const toc = document.querySelectorAll('.vector-toc-text');
       convertible.forEach(element => {
@@ -184,7 +191,6 @@
         await this.convertToJawi();
         const templateNodes = document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`);
         templateNodes.forEach(element => safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent)));
-        // Global hamza conversion
         document.querySelectorAll("*:not(script):not(style)").forEach(el => {
           if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE && el.textContent.includes("ء")) {
             safeSetInnerHTML(el, replaceHamzaWithSpan(el.textContent));
@@ -245,7 +251,7 @@
                 parent.nodeType === 1 &&
                 !parent.classList.contains(UI.NOCONVERT_CLASS) &&
                 parent.closest("#mw-content-text")
-              ) this.setRTLDirection(parent, true);
+              ) Converter.setRTLDirection(parent, true);
               parent = parent.parentElement;
             }
           }
@@ -511,24 +517,46 @@
         return;
       }
       document.querySelectorAll("#n-malayscriptconverter, #n-ui-language").forEach(el => el.remove());
+
+      // --- Penukar kandungan (script conversion) ---
       const scriptLi = document.createElement("li");
       scriptLi.id = "n-malayscriptconverter";
       scriptLi.className = UI.NAMESPACE_CLASS;
-      const currentLanguage = mw.config.get("wgUserLanguage");
-      const pendingScript = sessionStorage.getItem("pendingScript");
-      const options = [
+      const persistentScript = (typeof Storage !== 'undefined') ? localStorage.getItem("persistentScript") : null;
+      const scriptOptions = [
         {
-          value: "rumi-ui",
+          value: "rumi-script",
           label: "Rumi",
-          checked: pendingScript ? pendingScript === "rumi" : (currentLanguage !== "ms-arab")
+          checked: persistentScript ? persistentScript === "rumi" : (State.script === "rumi")
         },
         {
-          value: "jawi-ui",
+          value: "jawi-script",
           label: "Jawi",
-          checked: pendingScript ? pendingScript === "jawi" : (currentLanguage === "ms-arab")
+          checked: persistentScript ? persistentScript === "jawi" : (State.script === "jawi")
         }
       ];
-      safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-ui", "Paparan tulisan", options));
+      safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-script", "Penukar kandungan", scriptOptions));
+
+      // --- Penukar antara muka (interface language) ---
+      const langLi = document.createElement("li");
+      langLi.id = "n-ui-language";
+      langLi.className = UI.NAMESPACE_CLASS;
+      const persistentLang = (typeof Storage !== 'undefined') ? localStorage.getItem("persistentLang") : null;
+      const currentLanguage = persistentLang || mw.config.get("wgUserLanguage");
+      const langOptions = [
+        {
+          value: "ms",
+          label: "Rumi",
+          checked: currentLanguage !== "ms-arab"
+        },
+        {
+          value: "ms-arab",
+          label: "Jawi",
+          checked: currentLanguage === "ms-arab"
+        }
+      ];
+      safeSetInnerHTML(langLi, this.createControlsHTML("rumi-jawi-lang", "Penukar antara muka", langOptions));
+
       if (isMobile) {
         let menuContainer = container.querySelector(".converter-container");
         if (!menuContainer) {
@@ -537,17 +565,28 @@
           container.appendChild(menuContainer);
         }
         menuContainer.appendChild(scriptLi);
+        menuContainer.appendChild(langLi);
       } else {
         container.appendChild(scriptLi);
+        container.appendChild(langLi);
       }
       this.setupEventHandlers();
     },
     setupEventHandlers() {
-      document.querySelectorAll(".cdx-radio__input[name=\"rumi-jawi-ui\"]").forEach(radio => {
+      document.querySelectorAll(".cdx-radio__input[name=\"rumi-jawi-script\"]").forEach(radio => {
         radio.addEventListener("change", async function() {
-          const isJawi = this.value === "jawi-ui";
-          const language = isJawi ? "ms-arab" : "ms";
-          if (typeof Storage !== 'undefined') sessionStorage.setItem("pendingScript", isJawi ? "jawi" : "rumi");
+          const isJawi = this.value === "jawi-script";
+          if (typeof Storage !== 'undefined') localStorage.setItem("persistentScript", isJawi ? "jawi" : "rumi");
+          await Converter.convert(isJawi);
+          State.setScript(isJawi ? "jawi" : "rumi");
+          setRadioChecked(isJawi ? "jawi-script" : "rumi-script");
+        });
+      });
+      document.querySelectorAll(".cdx-radio__input[name=\"rumi-jawi-lang\"]").forEach(radio => {
+        radio.addEventListener("change", async function() {
+          const language = this.value;
+          if (typeof Storage !== 'undefined') localStorage.setItem("persistentLang", language);
+          setRadioChecked(language);
           await UIManager.setUserLanguage(language);
           window.location.reload();
         });
@@ -567,7 +606,7 @@
     }
   };
 
-  // --- Utility: Replace hamza with styled span according to position and exceptions ---
+  // --- Utility: Replace hamza with styled span ---
   function replaceHamzaWithSpan(text) {
     if (!text) return text;
     try {
@@ -579,7 +618,7 @@
         protectedMap[key] = ex;
         text = text.replace(new RegExp(ex, "g"), key);
       });
-      const hamzaSpan = '<span style="position: relative; bottom: 0.26em;">ء</span>';
+      const hamzaSpan = '<span style="vertical-align: 20%">ء</span>';
       forceCodaWords.forEach(word => {
         const wordWithSpan = word.replace(/ء/g, hamzaSpan);
         text = text.replace(new RegExp(word, "g"), wordWithSpan);
@@ -597,7 +636,7 @@
   }
 
   // --- Page context and initialization ---
-  const checkPageContext = () => {
+  function checkPageContext() {
     try {
       return typeof mw.config.get("wgNamespaceNumber") !== "undefined" &&
         !["edit", "submit"].includes(mw.config.get("wgAction")) &&
@@ -607,18 +646,13 @@
       console.error("Error checking page context:", error);
       return false;
     }
-  };
+  }
 
-  const getRequiredElements = () => {
+  function getRequiredElements() {
     const contentElement = document.querySelector("#mw-content-text");
     const titleElement = document.querySelector(".mw-first-heading");
     if (!contentElement || !titleElement) throw new Error("Required content elements not found");
     return { content: contentElement, title: titleElement };
-  };
-
-  function setRadioChecked(value) {
-    const radio = document.querySelector(`.cdx-radio__input[name="rumi-jawi-ui"][value="${value}"]`);
-    if (radio) radio.checked = true;
   }
 
   async function initializeApp() {
@@ -628,17 +662,23 @@
       State.init(content, title);
       UIManager.initialize();
       TemplateManager.initialize();
-      const [dictionary, currentLanguage] = await Promise.all([
-        DictionaryManager.fetch(),
-        Promise.resolve(mw.config.get("wgUserLanguage"))
+      const [dictionary] = await Promise.all([
+        DictionaryManager.fetch()
       ]);
       State.dictionary = dictionary;
-      const pendingScript = (typeof Storage !== 'undefined') ? sessionStorage.getItem("pendingScript") : null;
-      const isJawi = currentLanguage === "ms-arab" || pendingScript === "jawi";
+      const persistentScript = (typeof Storage !== 'undefined') ? localStorage.getItem("persistentScript") : null;
+      const persistentLang = (typeof Storage !== 'undefined') ? localStorage.getItem("persistentLang") : null;
+      let isJawi = false;
+      if (persistentScript) {
+        isJawi = persistentScript === "jawi";
+      } else {
+        const currentLanguage = persistentLang || mw.config.get("wgUserLanguage");
+        isJawi = currentLanguage === "ms-arab";
+      }
       State.setScript(isJawi ? "jawi" : "rumi");
-      setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
+      setRadioChecked(isJawi ? "jawi-script" : "rumi-script");
+      setRadioChecked((persistentLang || mw.config.get("wgUserLanguage")) === "ms-arab" ? "ms-arab" : "ms");
       if (isJawi) await Converter.convert(true);
-      if (pendingScript && typeof Storage !== 'undefined') sessionStorage.removeItem("pendingScript");
       State.initialized = true;
       DEBUG && console.log("Initialized successfully");
     } catch (error) {
