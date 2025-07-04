@@ -581,7 +581,7 @@
         protectedMap[key] = ex;
         text = text.replace(new RegExp(ex, "g"), key);
       });
-      const hamzaSpan = '<span style="vertical-align: 18%">ء</span>';
+      const hamzaSpan = '<span style="vertical-align: 28%; line-height:1.0;">ء</span>';
       forceCodaWords.forEach(word => {
         const wordWithSpan = word.replace(/ء/g, hamzaSpan);
         text = text.replace(new RegExp(word, "g"), wordWithSpan);
