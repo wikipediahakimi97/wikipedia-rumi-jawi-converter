@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 25th June 2025
+ ** Updated on 15th July 2025
  **
  **/
 
@@ -17,29 +17,22 @@
 */
 
 (() => {
-  // --- Utility constants and functions ---
-  const CACHE_KEY = "rumiJawiData";
-  const CACHE_DURATION = 60 * 60 * 1000; // 1 hour
-  const DEBUG = false;
+  // --- Constants & Utilities ---
+  const CACHE_KEY = "rumiJawiData", CACHE_DURATION = 3600000, DEBUG = false;
   const SPARQL_URL = "https://query-main.wikidata.org/sparql";
   const SPARQL_QUERY = `SELECT DISTINCT ?formId ?latn ?arab (GROUP_CONCAT(DISTINCT ?featureLabel; SEPARATOR=", ") AS ?features) 
-		WHERE {
-		  ?lexEntry dct:language wd:Q9237;
-		           ontolex:lexicalForm ?form.
-		  BIND(STRAFTER(STR(?form), "http://www.wikidata.org/entity/") AS ?formId)
-		  ?form ontolex:representation ?latn FILTER (lang(?latn) = "ms")
-		  ?form ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab")
-		  OPTIONAL { 
-		    ?form wikibase:grammaticalFeature ?feature.
-		    ?feature rdfs:label ?featureLabel FILTER (lang(?featureLabel) = "en")
-		  }
-		  FILTER (!BOUND(?feature) || (
-		    ?feature != wd:Q98912 && 
-		    ?feature != wd:Q8185162 && 
-		    ?feature != wd:Q10617810
-		  ))
-		}
-		GROUP BY ?formId ?latn ?arab`;
+    WHERE {
+      ?lexEntry dct:language wd:Q9237; ontolex:lexicalForm ?form.
+      BIND(STRAFTER(STR(?form), "http://www.wikidata.org/entity/") AS ?formId)
+      ?form ontolex:representation ?latn FILTER (lang(?latn) = "ms")
+      ?form ontolex:representation ?arab FILTER (lang(?arab) = "ms-arab")
+      OPTIONAL { ?form wikibase:grammaticalFeature ?feature.
+        ?feature rdfs:label ?featureLabel FILTER (lang(?featureLabel) = "en") }
+      FILTER (!BOUND(?feature) || (
+        ?feature != wd:Q98912 && ?feature != wd:Q8185162 && ?feature != wd:Q10617810
+      ))
+    }
+    GROUP BY ?formId ?latn ?arab`;
 
   const UI = {
     TEMPLATE_CLASS: "mw-explicit-form-mapping",
@@ -49,52 +42,28 @@
     SUPPORTED_SKINS: ["vector-2022", "vector", "monobook", "timeless", "minerva"],
     NAMESPACE_CLASS: "mw-list-item"
   };
-
   const PUNCTUATION_MAP = { ",": "⹁", ";": "⁏", "?": "؟" };
 
-  // --- Utility functions for safe DOM manipulation ---
-  function safeSetInnerHTML(element, content) {
-    if (typeof content === 'string' && content.includes('<')) {
-      const tempDiv = document.createElement('div');
-      tempDiv.innerHTML = content;
-      element.innerHTML = '';
-      while (tempDiv.firstChild) element.appendChild(tempDiv.firstChild);
-    } else {
-      element.textContent = content;
-    }
-  }
-  function safeSetTextContent(element, content) {
-    element.textContent = content;
-  }
+  const safeSetInnerHTML = (el, html) => {
+    if (typeof html === 'string' && html.includes('<')) {
+      const d = document.createElement('div'); d.innerHTML = html;
+      el.innerHTML = ''; while (d.firstChild) el.appendChild(d.firstChild);
+    } else el.textContent = html;
+  };
+  const safeSetTextContent = (el, txt) => { el.textContent = txt; };
+  const setRadioChecked = v => document.querySelectorAll(`.cdx-radio__input[value="${v}"]`).forEach(r => r.checked = true);
 
-  // --- State management ---
+  // --- State ---
   const State = {
-    script: "rumi",
-    content: null,
-    title: null,
-    originalContent: null,
-    originalTitle: null,
-    dictionary: null,
-    templateOverrides: new Map(),
-    initialized: false,
-    init(content, title) {
-      this.content = content;
-      this.title = title;
-      return this;
-    },
-    setScript(script) {
-      this.script = script;
-      return this;
-    }
+    script: "rumi", content: null, title: null, originalContent: null, originalTitle: null,
+    dictionary: null, templateOverrides: new Map(), initialized: false,
+    init(content, title) { this.content = content; this.title = title; return this; },
+    setScript(script) { this.script = script; return this; }
   };
 
-  // --- Dictionary manager ---
+  // --- Dictionary ---
   const DictionaryManager = {
-    async fetch() {
-      const cached = this.loadFromCache();
-      if (cached) return cached;
-      return await this.fetchFromAPI();
-    },
+    async fetch() { return this.loadFromCache() || await this.fetchFromAPI(); },
     loadFromCache() {
       try {
         if (typeof Storage === 'undefined') return null;
@@ -103,9 +72,7 @@
           const { timestamp, data } = JSON.parse(cached);
           if (Date.now() - timestamp < CACHE_DURATION) return data;
         }
-      } catch (e) {
-        DEBUG && console.warn("Cache access error:", e);
-      }
+      } catch (e) { DEBUG && console.warn("Cache access error:", e); }
       return null;
     },
     async fetchFromAPI() {
@@ -113,25 +80,17 @@
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 30000);
         const response = await fetch(
-          `${SPARQL_URL}?query=${encodeURIComponent(SPARQL_QUERY)}&format=json`, {
-            headers: { Accept: "application/sparql-results+json" },
-            signal: controller.signal
-          }
+          `${SPARQL_URL}?query=${encodeURIComponent(SPARQL_QUERY)}&format=json`,
+          { headers: { Accept: "application/sparql-results+json" }, signal: controller.signal }
         );
         clearTimeout(timeoutId);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         const processedData = this.process(result);
         try {
-          if (typeof Storage !== 'undefined') {
-            localStorage.setItem(CACHE_KEY, JSON.stringify({
-              timestamp: Date.now(),
-              data: processedData
-            }));
-          }
-        } catch (e) {
-          DEBUG && console.warn("Error storing in localStorage:", e);
-        }
+          if (typeof Storage !== 'undefined')
+            localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: processedData }));
+        } catch (e) { DEBUG && console.warn("Error storing in localStorage:", e); }
         return processedData;
       } catch (error) {
         console.error("Error fetching Rumi-Jawi data:", error);
@@ -139,62 +98,58 @@
       }
     },
     process(data) {
-      const dictionary = { words: {}, phrases: {}, forms: {}, formMappings: {} };
-      if (!data?.results?.bindings) return dictionary;
-      data.results.bindings.forEach(({ formId, latn, arab }) => {
+      const dict = { words: {}, phrases: {}, forms: {}, formMappings: {} };
+      data?.results?.bindings?.forEach(({ formId, latn, arab }) => {
         if (!formId || !latn || !arab) return;
-        const rumiText = latn.value.toLowerCase();
-        const jawiText = arab.value;
-        const formIdValue = formId.value;
-        dictionary.forms[formIdValue] = jawiText;
-        dictionary.formMappings[formIdValue] = rumiText;
-        (rumiText.includes(" ") ? dictionary.phrases : dictionary.words)[rumiText] = formIdValue;
+        const rumi = latn.value.toLowerCase(), jawi = arab.value, fid = formId.value;
+        dict.forms[fid] = jawi; dict.formMappings[fid] = rumi;
+        (rumi.includes(" ") ? dict.phrases : dict.words)[rumi] = fid;
       });
-      return dictionary;
+      return dict;
     }
   };
 
-  // --- Converter core ---
+  // --- Converter ---
   const Converter = {
     async convert(toJawi) {
       if (!State.dictionary) State.dictionary = await DictionaryManager.fetch();
       TemplateManager.collectOverrides();
       TemplateManager.convert(toJawi);
 
-      // Cache NodeLists to avoid repeated queries
-      const convertible = document.querySelectorAll('.convertible-text');
-      const toc = document.querySelectorAll('.vector-toc-text');
-      convertible.forEach(element => {
-        const rumiText = element.getAttribute('data-rumi');
-        if (rumiText) {
-          let newText = toJawi ? this.convertText(rumiText, State.dictionary) : rumiText;
-          if (toJawi) newText = replaceHamzaWithSpan(newText);
-          safeSetInnerHTML(element, newText);
-          this.setRTLDirection(element, toJawi);
+      const updateNodes = (sel, cb) => document.querySelectorAll(sel).forEach(cb);
+
+      updateNodes('.convertible-text', el => {
+        if (el.closest('.IPA')) return;
+        const rumi = el.getAttribute('data-rumi');
+        if (rumi) {
+          let txt = toJawi ? this.convertText(rumi, State.dictionary) : rumi;
+          if (toJawi) txt = replaceHamzaWithSpan(wrapIPASegmentsLTR(txt));
+          safeSetInnerHTML(el, txt);
+          this.setRTLDirection(el, toJawi);
         }
       });
-      toc.forEach(element => {
-        if (!element.hasAttribute('data-rumi')) element.setAttribute('data-rumi', element.textContent);
-        const rumiText = element.getAttribute('data-rumi');
-        let newText = toJawi ? this.convertText(rumiText, State.dictionary) : rumiText;
-        if (toJawi) newText = replaceHamzaWithSpan(newText);
-        safeSetInnerHTML(element, newText);
-        this.setRTLDirection(element, toJawi);
+      updateNodes('.vector-toc-text', el => {
+        if (el.closest('.IPA')) return;
+        if (!el.hasAttribute('data-rumi')) el.setAttribute('data-rumi', el.textContent);
+        const rumi = el.getAttribute('data-rumi');
+        let txt = toJawi ? this.convertText(rumi, State.dictionary) : rumi;
+        if (toJawi) txt = replaceHamzaWithSpan(wrapIPASegmentsLTR(txt));
+        safeSetInnerHTML(el, txt);
+        this.setRTLDirection(el, toJawi);
       });
 
       if (toJawi) {
         await this.convertToJawi();
-        const templateNodes = document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`);
-        templateNodes.forEach(element => safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent)));
-        // Global hamza conversion
-        document.querySelectorAll("*:not(script):not(style)").forEach(el => {
-          if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE && el.textContent.includes("ء")) {
-            safeSetInnerHTML(el, replaceHamzaWithSpan(el.textContent));
-          }
+        updateNodes(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`, el => {
+          if (el.closest('.IPA')) return;
+          safeSetInnerHTML(el, replaceHamzaWithSpan(wrapIPASegmentsLTR(el.textContent)));
         });
-      } else {
-        this.revertToRumi();
-      }
+        updateNodes("*:not(script):not(style)", el => {
+          if (el.closest('.IPA')) return;
+          if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE && el.textContent.includes("ء"))
+            safeSetInnerHTML(el, replaceHamzaWithSpan(wrapIPASegmentsLTR(el.textContent)));
+        });
+      } else this.revertToRumi();
     },
     async convertToJawi() {
       if (!State.originalContent) {
@@ -203,62 +158,63 @@
       }
       this.setRTLDirection(State.content, true);
       this.setRTLDirection(State.title, true);
-      safeSetInnerHTML(State.title, replaceHamzaWithSpan(this.convertText(State.title.textContent, State.dictionary)));
+      let convertedTitle = this.convertText(State.title.textContent, State.dictionary);
+      convertedTitle = replaceHamzaWithSpan(wrapIPASegmentsLTR(convertedTitle));
+      safeSetInnerHTML(State.title, convertedTitle);
 
       const walker = document.createTreeWalker(
-        State.content,
-        NodeFilter.SHOW_TEXT, {
+        State.content, NodeFilter.SHOW_TEXT, {
           acceptNode: node => {
-            const parent = node.parentElement;
-            if (!parent) return NodeFilter.FILTER_REJECT;
-            if (
-              parent.tagName === "SCRIPT" ||
-              parent.tagName === "STYLE" ||
-              parent.classList.contains(UI.NOCONVERT_CLASS) ||
-              parent.classList.contains(UI.TEMPLATE_CLASS) ||
-              parent.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header")
-            ) return NodeFilter.FILTER_REJECT;
+            const p = node.parentElement;
+            if (!p) return NodeFilter.FILTER_REJECT;
+            if (["SCRIPT", "STYLE"].includes(p.tagName) ||
+              p.classList.contains(UI.NOCONVERT_CLASS) ||
+              p.classList.contains(UI.TEMPLATE_CLASS) ||
+              p.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header") ||
+              p.classList.contains("IPA") || p.closest(".IPA"))
+              return NodeFilter.FILTER_REJECT;
             return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
           }
         }
       );
       const textNodes = [];
-      let node;
-      while ((node = walker.nextNode())) textNodes.push(node);
+      let node; while ((node = walker.nextNode())) textNodes.push(node);
 
-      let currentIndex = 0, chunkSize = 50;
-      const processNextChunk = () => {
-        const endIndex = Math.min(currentIndex + chunkSize, textNodes.length);
-        for (let i = currentIndex; i < endIndex; i++) {
-          const textNode = textNodes[i];
-          if (textNode && textNode.textContent && textNode.textContent.trim()) {
-            let converted = this.convertText(textNode.textContent, State.dictionary);
-            converted = replaceHamzaWithSpan(converted);
-            if (converted !== textNode.textContent && /<span[^>]*>ء<\/span>/.test(converted)) {
+      let idx = 0, chunk = 50;
+      const processChunk = () => {
+        for (let i = idx; i < Math.min(idx + chunk, textNodes.length); i++) {
+          const n = textNodes[i];
+          if (n && n.textContent && n.textContent.trim()) {
+            let converted = this.convertText(n.textContent, State.dictionary);
+            converted = replaceHamzaWithSpan(wrapIPASegmentsLTR(converted));
+            if (converted !== n.textContent && (/<span[^>]*>ء<\/span>/.test(converted) || /<span dir="ltr"/.test(converted))) {
               const span = document.createElement("span");
               safeSetInnerHTML(span, converted);
-              if (textNode.parentNode) textNode.parentNode.replaceChild(span, textNode);
-            } else {
-              textNode.textContent = converted;
-            }
-            let parent = textNode.parentElement;
-            while (parent && !parent.classList.contains("mw-content-text")) {
-              if (
-                parent.nodeType === 1 &&
-                !parent.classList.contains(UI.NOCONVERT_CLASS) &&
-                parent.closest("#mw-content-text")
-              ) this.setRTLDirection(parent, true);
-              parent = parent.parentElement;
+              n.parentNode && n.parentNode.replaceChild(span, n);
+            } else n.textContent = converted;
+            let p = n.parentElement;
+            while (p && !p.classList.contains("mw-content-text")) {
+              if (p.nodeType === 1 && 
+                  !p.classList.contains(UI.NOCONVERT_CLASS) && 
+                  p.closest("#mw-content-text") &&
+                  !p.classList.contains("IPA") && 
+                  !p.closest(".IPA")) {
+                Converter.setRTLDirection(p, true);
+              }
+              p = p.parentElement;
             }
           }
         }
-        currentIndex = endIndex;
-        if (currentIndex < textNodes.length) requestAnimationFrame(processNextChunk);
+        idx += chunk;
+        if (idx < textNodes.length) requestAnimationFrame(processChunk);
       };
-      requestAnimationFrame(processNextChunk);
+      requestAnimationFrame(processChunk);
 
       document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`)
-        .forEach(element => safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent)));
+        .forEach(el => {
+          if (el.closest('.IPA')) return;
+          safeSetInnerHTML(el, replaceHamzaWithSpan(wrapIPASegmentsLTR(el.textContent)));
+        });
     },
     revertToRumi() {
       if (State.originalContent) {
@@ -267,73 +223,79 @@
         this.setRTLDirection(State.content, false);
         this.setRTLDirection(State.title, false);
         State.content.querySelectorAll("[dir=\"rtl\"]").forEach(el => {
-          el.removeAttribute("dir");
-          el.removeAttribute("lang");
+          el.removeAttribute("dir"); el.removeAttribute("lang");
         });
-        State.originalContent = null;
-        State.originalTitle = null;
+        State.originalContent = State.originalTitle = null;
       }
+      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(el => {
+        const rumi = el.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR);
+        if (rumi) { safeSetInnerHTML(el, rumi); Converter.setRTLDirection(el, false); }
+      });
     },
     convertText(text, dict) {
       if (!text?.trim() || !dict) return text;
       const numbers = [];
-      let result = text.replace(/\d+(?:[,.]\d+)*(?:\.\d+)?%?/g, match => {
-        const placeholder = `__NUM${numbers.push(`\u2066${match}\u2069`) - 1}__`;
-        return placeholder;
-      });
-      // Phrases
-      const sortedPhrases = Object.keys(dict.phrases).sort((a, b) => b.length - a.length);
-      if (sortedPhrases.length) {
-        const phraseRegex = new RegExp(
-          sortedPhrases.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
-          "gi"
-        );
-        result = result.replace(phraseRegex, match => {
-          const formId = dict.phrases[match.toLowerCase()];
-          return formId ? dict.forms[formId] : match;
-        });
-      }
-      // Apostrophe words
-      const apostropheWords = Object.keys(dict.words).filter(word => word.includes("'")).sort((a, b) => b.length - a.length);
-      if (apostropheWords.length) {
-        const apostropheRegex = new RegExp(
-          apostropheWords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
-          "gi"
-        );
-        result = result.replace(apostropheRegex, match => {
-          const formId = dict.words[match.toLowerCase()];
-          return formId ? dict.forms[formId] : match;
-        });
-      }
-      // Hyphenated words
-      result = result.replace(/\b\w+(?:-\w+)+\b/g, match => {
-        const formId = dict.words[match.toLowerCase()];
-        if (formId) return dict.forms[formId];
-        return match.split("-").map(part => {
-          const partFormId = dict.words[part.toLowerCase()];
-          return partFormId ? dict.forms[partFormId] : part;
+      // Modified regex to include Unicode letters adjacent to numbers
+      let result = text.replace(/(?:\p{L}*\d+(?:[,.]\d+)*(?:\.\d+)?%?\p{L}*|\d+(?:[,.]\d+)*(?:\.\d+)?%?)/gu, m => `__NUM${numbers.push(`\u2066${m}\u2069`) - 1}__`);
+      
+      const replaceByDictKeys = (str, dictObj, type) => {
+        const keys = Object.keys(dictObj).filter(type).sort((a, b) => b.length - a.length);
+        if (!keys.length) return str;
+        const regex = new RegExp(keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi");
+        return str.replace(regex, m => dict.forms[dictObj[m.toLowerCase()]] || m);
+      };
+      result = replaceByDictKeys(result, dict.phrases, () => true);
+      result = replaceByDictKeys(result, dict.words, w => w.includes("'"));
+      result = result.replace(/\b\w+(?:-\w+)+\b/g, m => {
+        const fid = dict.words[m.toLowerCase()];
+        if (fid) return dict.forms[fid];
+        return m.split("-").map(part => {
+          const pfid = dict.words[part.toLowerCase()];
+          return pfid ? dict.forms[pfid] : part;
         }).join("-");
       });
-      // Single words
-      result = result.replace(/\b[a-zA-Z\u00C0-\u024F0-9_]+\b/g, match => {
-        const formId = dict.words[match.toLowerCase()];
-        return formId ? dict.forms[formId] : match;
+      let singleWordRegex;
+      try { singleWordRegex = new RegExp("\\b[\\p{L}\\p{N}_]+\\b", "gu"); }
+      catch { singleWordRegex = /\b[\w\u00C0-\uFFFF]+\b/g; }
+      result = result.replace(singleWordRegex, m => {
+        const fid = dict.words[m.toLowerCase()];
+        return fid ? dict.forms[fid] : m;
       });
-      // Special replacements
-      result = result.replace(/(^|[\s]+)([کد])[\s]+(\S)/g, (match, spaceBefore, letter, nextChar) => {
-        const processedNextChar = nextChar === "ا" ? "أ" : nextChar;
-        return `${spaceBefore}${letter}${processedNextChar}`;
-      });
-      result = result.replace(/[,;?]/g, match => PUNCTUATION_MAP[match] || match);
-      numbers.forEach((number, index) => {
-        result = result.replace(`__NUM${index}__`, number);
-      });
+      result = result.replace(/(^|[\s]+)([کد])[\s]+(\S)/g, (m, s, l, n) => `${s}${l}${n === "ا" ? "أ" : n}`);
+      result = result.replace(/[,;?]/g, m => PUNCTUATION_MAP[m] || m);
+      numbers.forEach((n, i) => { result = result.replace(`__NUM${i}__`, n); });
       return result;
     },
-    setRTLDirection(element, isRTL) {
-      if (!element) return;
-      element.setAttribute("dir", isRTL ? "rtl" : "ltr");
-      element.setAttribute("lang", isRTL ? "ms-arab" : "ms");
+    setRTLDirection(el, isRTL) {
+      if (!el) return;
+      
+      // Only skip setting direction if the element itself is an IPA element
+      if (el.classList?.contains("IPA") || el.closest?.(".IPA")) {
+        // Remove any RTL/LTR attributes from IPA elements and their children
+        el.removeAttribute("dir"); 
+        el.removeAttribute("lang");
+        el.querySelectorAll?.("*").forEach(child => {
+          child.removeAttribute("dir"); 
+          child.removeAttribute("lang");
+        });
+        return;
+      }
+      
+      // For parent elements that contain IPA, set RTL but ensure IPA children remain protected
+      el.setAttribute("dir", isRTL ? "rtl" : "ltr");
+      el.setAttribute("lang", isRTL ? "ms-arab" : "ms");
+      
+      // After setting direction, protect any IPA descendants
+      if (el.querySelector?.(".IPA")) {
+        el.querySelectorAll(".IPA").forEach(ipaEl => {
+          ipaEl.removeAttribute("dir");
+          ipaEl.removeAttribute("lang");
+          ipaEl.querySelectorAll("*").forEach(child => {
+            child.removeAttribute("dir");
+            child.removeAttribute("lang");
+          });
+        });
+      }
     }
   };
 
@@ -341,51 +303,44 @@
   const TemplateManager = {
     collectOverrides() {
       State.templateOverrides.clear();
-      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(element => {
-        const rumiText = element.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)?.toLowerCase();
-        const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
-        if (rumiText && formId) State.templateOverrides.set(rumiText, { formId });
+      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(el => {
+        const rumi = el.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)?.toLowerCase();
+        const formId = el.getAttribute(UI.TEMPLATE_DATA_ATTR);
+        if (rumi && formId) State.templateOverrides.set(rumi, { formId });
       });
     },
     convert(toJawi) {
-      const templates = document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`);
-      templates.forEach(element => {
-        const rumiText = element.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR);
-        const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
-        if (!this.validateFormMapping(formId, rumiText, State.dictionary)) {
-          element.classList.add(UI.NOCONVERT_CLASS);
-          element.classList.remove(UI.TEMPLATE_CLASS);
-          return;
+      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(el => {
+        const rumi = el.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR);
+        const formId = el.getAttribute(UI.TEMPLATE_DATA_ATTR);
+        if (!this.validateFormMapping(formId, rumi, State.dictionary)) {
+          el.classList.add(UI.NOCONVERT_CLASS); el.classList.remove(UI.TEMPLATE_CLASS); return;
         }
-        let newText = toJawi ? State.dictionary.forms[formId] || rumiText : rumiText;
-        if (toJawi) newText = replaceHamzaWithSpan(newText);
-        if (element.innerHTML !== newText) {
-          safeSetInnerHTML(element, newText);
-          Converter.setRTLDirection(element, toJawi);
+        let txt = toJawi ? State.dictionary.forms[formId] || rumi : rumi;
+        if (toJawi) txt = replaceHamzaWithSpan(txt);
+        if (el.innerHTML !== txt) {
+          safeSetInnerHTML(el, txt);
+          Converter.setRTLDirection(el, toJawi);
         }
       });
-      if (toJawi) {
-        document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).forEach(element =>
-          safeSetInnerHTML(element, replaceHamzaWithSpan(element.textContent))
+      if (toJawi)
+        document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).forEach(el =>
+          safeSetInnerHTML(el, replaceHamzaWithSpan(el.textContent))
         );
-      }
     },
-    validateFormMapping(formId, rumiText, dict) {
-      return !!(formId && rumiText && dict?.formMappings?.[formId] && dict.formMappings[formId].toLowerCase() === rumiText.toLowerCase());
+    validateFormMapping(formId, rumi, dict) {
+      return !!(formId && rumi && dict?.formMappings?.[formId] && dict.formMappings[formId].toLowerCase() === rumi.toLowerCase());
     },
     initialize() {
-      document.querySelectorAll("[data-form-id]").forEach(element => {
-        if (element.classList.contains(UI.TEMPLATE_CLASS)) return;
-        const formId = element.getAttribute(UI.TEMPLATE_DATA_ATTR);
+      document.querySelectorAll("[data-form-id]").forEach(el => {
+        if (el.classList.contains(UI.TEMPLATE_CLASS)) return;
+        const formId = el.getAttribute(UI.TEMPLATE_DATA_ATTR);
         if (!formId) return;
-        if (!element.hasAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)) {
-          element.setAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR, element.textContent);
-        }
-        element.classList.add(UI.TEMPLATE_CLASS);
+        if (!el.hasAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR))
+          el.setAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR, el.textContent);
+        el.classList.add(UI.TEMPLATE_CLASS);
       });
-      document.querySelectorAll("[data-no-convert]").forEach(element => {
-        element.classList.add(UI.NOCONVERT_CLASS);
-      });
+      document.querySelectorAll("[data-no-convert]").forEach(el => el.classList.add(UI.NOCONVERT_CLASS));
       DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).length} form templates`);
       DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).length} no-convert templates`);
     }
@@ -394,143 +349,103 @@
   // --- UI manager ---
   const UIManager = {
     setupStyles() {
-      const existingStyles = document.getElementById("rumi-jawi-styles");
-      if (existingStyles) existingStyles.remove();
-      const skin = mw.config.get("skin");
-      const isMobile = skin === "minerva";
-      const isMonobook = skin === "monobook";
+      document.getElementById("rumi-jawi-styles")?.remove();
+      const skin = mw.config.get("skin"), isMobile = skin === "minerva", isMonobook = skin === "monobook";
       const css = `
-      /* Use more specific selectors with a unique namespace */
-      /* Base styles for converter container */
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS},
-      #n-ui-language.${UI.NAMESPACE_CLASS} {
-        margin: ${isMobile ? "8px 0" : "0"};
-        ${isMobile ? "list-style: none;" : ""}
-      }
-      ${isMobile ? `.menu .${UI.NAMESPACE_CLASS}::before {
-        display: none !important;
-      }` : ""}
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-label--title,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-label--title {
-        font-weight: bold;
-        font-size: inherit;
-        padding: ${isMobile ? "8px 16px 4px" : "0"};
-        color: ${isMobile ? "var(--color-base, #54595d);" : ""};
-      }
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio--inline,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio--inline {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-      }
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__content,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio__content {
-        padding: ${isMobile ? "8px 16px" : "4px 0"};
-      }
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__label,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio__label {
-        display: flex;
-        align-items: center;
-        cursor: pointer;
-        gap: ${isMobile ? "12px" : "4px"};
-        width: 100%;
-        ${isMonobook ? "position: relative;" : ""}
-      }
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio__input {
-        ${isMobile ? `
-          position: absolute;
-          opacity: 0;
-        ` : "margin: 0;"}
-        ${isMonobook ? "position: static; " : ""}
-      }
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__icon,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio__icon {
-        width: ${isMobile ? "20px" : "14px"};
-        height: ${isMobile ? "20px" : "14px"};
-        ${isMobile ? `
-          border: 2px solid var(--color-notice, #72777d);
-          border-radius: 50%;
-          position: relative;
-          flex-shrink: 0;
-        ` : ""}
-      }
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon {
-        border-color: var(--color-progressive, #36c);
-      }
-      ${isMobile ? `
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon:after,
-        #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon:after {
-          content: '';
-          position: absolute;
-          width: 10px;
-          height: 10px;
-          background: var(--color-progressive, #36c);
-          border-radius: 50%;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
+        .IPA, .IPA * { direction: ltr !important; unicode-bidi: isolate !important; }
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} {
+          margin: ${isMobile ? "8px 0" : "0"};
+          ${isMobile ? "list-style: none;" : ""}
         }
-      ` : ""}
-      #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked ~ .cdx-radio__label-content,
-      #n-ui-language.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked ~ .cdx-radio__label-content {
-        color: var(--color-progressive, #36c);
-      }
-    `;
-      const styleElement = document.createElement("style");
-      styleElement.id = "rumi-jawi-styles";
-      styleElement.textContent = css;
-      document.head.appendChild(styleElement);
+        ${isMobile ? `.menu .${UI.NAMESPACE_CLASS}::before { display: none !important; }` : ""}
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-label--title {
+          font-weight: bold; font-size: inherit; padding: ${isMobile ? "8px 16px 4px" : "0"};
+          color: ${isMobile ? "var(--color-base, #54595d);" : ""};
+        }
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio--inline {
+          display: flex; flex-direction: column; align-items: flex-start;
+        }
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__content {
+          padding: ${isMobile ? "8px 16px" : "4px 0"};
+        }
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__label {
+          display: flex; align-items: center; cursor: pointer; gap: ${isMobile ? "12px" : "4px"};
+          width: 100%; ${isMonobook ? "position: relative;" : ""}
+        }
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input {
+          ${isMobile ? `position: absolute; opacity: 0;` : "margin: 0;"}
+          ${isMonobook ? "position: static; " : ""}
+        }
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__icon {
+          width: ${isMobile ? "20px" : "14px"}; height: ${isMobile ? "20px" : "14px"};
+          ${isMobile ? `border: 2px solid var(--color-notice, #72777d); border-radius: 50%; position: relative; flex-shrink: 0;` : ""}
+        }
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon {
+          border-color: var(--color-progressive, #36c);
+        }
+        ${isMobile ? `
+          #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon:after {
+            content: ''; position: absolute; width: 10px; height: 10px;
+            background: var(--color-progressive, #36c); border-radius: 50%;
+            top: 50%; left: 50%; transform: translate(-50%, -50%);
+          }
+        ` : ""}
+        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked ~ .cdx-radio__label-content {
+          color: var(--color-progressive, #36c);
+        }
+      `;
+      const style = document.createElement("style");
+      style.id = "rumi-jawi-styles"; style.textContent = css;
+      document.head.appendChild(style);
     },
     createControlsHTML(name, title, options) {
       let html = `<div class="cdx-field"><label class="cdx-label cdx-label--title">
         <span class="cdx-label__text convertible-text" data-rumi="${title}">${title}</span>
         </label><div class="cdx-radio--inline" role="radiogroup" aria-label="${title}">`;
-      options.forEach(option => {
+      options.forEach(opt => {
         html += `<div class="cdx-radio__content"><label class="cdx-radio__label">
-          <input type="radio" class="cdx-radio__input" name="${name}" value="${option.value}" 
-            ${option.checked ? "checked" : ""} aria-checked="${option.checked}">
+          <input type="radio" class="cdx-radio__input" name="${name}" value="${opt.value}" 
+            ${opt.checked ? "checked" : ""} aria-checked="${opt.checked}">
           <span class="cdx-radio__icon"></span>
-          <span class="cdx-radio__label-content convertible-text" data-rumi="${option.label}">${option.label}</span>
+          <span class="cdx-radio__label-content convertible-text" data-rumi="${opt.label}">${opt.label}</span>
           </label></div>`;
       });
-      html += "</div></div>";
-      return html;
+      return html + "</div></div>";
     },
     setupControls() {
       const skin = mw.config.get("skin");
-      if (!UI.SUPPORTED_SKINS.includes(skin)) {
-        DEBUG && console.log(`Unsupported skin: ${skin}, no UI will be shown`);
-        return;
-      }
+      if (!UI.SUPPORTED_SKINS.includes(skin)) { DEBUG && console.log(`Unsupported skin: ${skin}`); return; }
       const isMobile = skin === "minerva";
       const container = isMobile ?
         document.querySelector(".menu") :
         document.querySelector("#vector-pinned-container ul, #p-navigation ul");
-      if (!container) {
-        console.error(`Navigation container not found for ${skin} skin`);
-        return;
-      }
+      if (!container) { console.error(`Navigation container not found for ${skin} skin`); return; }
       document.querySelectorAll("#n-malayscriptconverter, #n-ui-language").forEach(el => el.remove());
+
+      // Create single merged control
       const scriptLi = document.createElement("li");
       scriptLi.id = "n-malayscriptconverter";
       scriptLi.className = UI.NAMESPACE_CLASS;
-      const currentLanguage = mw.config.get("wgUserLanguage");
-      const pendingScript = sessionStorage.getItem("pendingScript");
+      
+      const persistentScript = typeof Storage !== 'undefined' ? localStorage.getItem("persistentScript") : null;
+      const persistentLang = typeof Storage !== 'undefined' ? localStorage.getItem("persistentLang") : null;
+      const currentLanguage = persistentLang || mw.config.get("wgUserLanguage");
+      
       const options = [
-        {
-          value: "rumi-ui",
-          label: "Rumi",
-          checked: pendingScript ? pendingScript === "rumi" : (currentLanguage !== "ms-arab")
+        { 
+          value: "rumi-ui", 
+          label: "Rumi", 
+          checked: persistentScript ? persistentScript === "rumi" : (currentLanguage !== "ms-arab") 
         },
-        {
-          value: "jawi-ui",
-          label: "Jawi",
-          checked: pendingScript ? pendingScript === "jawi" : (currentLanguage === "ms-arab")
+        { 
+          value: "jawi-ui", 
+          label: "Jawi", 
+          checked: persistentScript ? persistentScript === "jawi" : (currentLanguage === "ms-arab") 
         }
       ];
-      safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-ui", "Paparan tulisan", options));
+      
+      safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-ui", "Pilihan paparan", options));
+
       if (isMobile) {
         let menuContainer = container.querySelector(".converter-container");
         if (!menuContainer) {
@@ -539,7 +454,7 @@
           container.appendChild(menuContainer);
         }
         menuContainer.appendChild(scriptLi);
-      } else {
+      } else { 
         container.appendChild(scriptLi);
       }
       this.setupEventHandlers();
@@ -549,80 +464,89 @@
         radio.addEventListener("change", async function() {
           const isJawi = this.value === "jawi-ui";
           const language = isJawi ? "ms-arab" : "ms";
-          if (typeof Storage !== 'undefined') sessionStorage.setItem("pendingScript", isJawi ? "jawi" : "rumi");
+          
+          // Store both preferences
+          if (typeof Storage !== 'undefined') {
+            localStorage.setItem("persistentScript", isJawi ? "jawi" : "rumi");
+            localStorage.setItem("persistentLang", language);
+          }
+          
+          // Update UI language and reload - conversion will happen after reload
           await UIManager.setUserLanguage(language);
           window.location.reload();
         });
       });
     },
     async setUserLanguage(language) {
-      try {
-        await new mw.Api().saveOption("language", language);
-        DEBUG && console.log(`Language preference set to ${language}`);
-      } catch (error) {
-        console.error("Failed to save language preference:", error);
-      }
+      try { await new mw.Api().saveOption("language", language); }
+      catch (error) { console.error("Failed to save language preference:", error); }
     },
-    initialize() {
-      this.setupStyles();
-      this.setupControls();
-    }
+    initialize() { this.setupStyles(); this.setupControls(); }
   };
 
-  // --- Utility: Replace hamza with styled span according to position and exceptions ---
+  // --- Utility: Replace hamza with styled span ---
   function replaceHamzaWithSpan(text) {
     if (!text) return text;
     try {
-      const skipExceptions = ["القرءان"];
-      const forceCodaWords = ["چيء", "داتوء", "توء", "نيء"];
-      let protectedMap = {};
-      skipExceptions.forEach((ex, i) => {
-        const key = `__EXC${i}__`;
-        protectedMap[key] = ex;
+      const skip = ["القرءان"], force = ["چيء", "داتوء", "توء", "نيء"];
+      let map = {};
+      skip.forEach((ex, i) => {
+        const key = `__EXC${i}__`; map[key] = ex;
         text = text.replace(new RegExp(ex, "g"), key);
       });
       const hamzaSpan = '<span style="vertical-align: 28%; line-height:1.0;">ء</span>';
-      forceCodaWords.forEach(word => {
+      force.forEach(word => {
         const wordWithSpan = word.replace(/ء/g, hamzaSpan);
         text = text.replace(new RegExp(word, "g"), wordWithSpan);
       });
-      text = text.replace(/(^|[\s\(\[\{،⹁⁏؟:;,.!?-])ء(?=[\u0600-\u06FF])/g, (match, p1) => p1 + hamzaSpan);
-      text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (match, p1) => p1 + hamzaSpan);
-      Object.entries(protectedMap).forEach(([key, ex]) => {
-        text = text.replace(new RegExp(key, "g"), ex);
-      });
+      text = text.replace(/(^|[\s\(\[\{،⹁⁏؟:;,.!?-])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
+      text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
+      Object.entries(map).forEach(([k, ex]) => { text = text.replace(new RegExp(k, "g"), ex); });
       return text;
-    } catch (error) {
-      console.error("Error in replaceHamzaWithSpan:", error);
-      return text;
-    }
+    } catch (error) { console.error("Error in replaceHamzaWithSpan:", error); return text; }
+  }
+
+  // --- Utility: Wrap IPASegments in LTR span ---
+  function wrapIPASegmentsLTR(text) {
+    if (!text) return text;
+    // Wrap HTML-based IPA segments with or without quotation marks (e.g., "/"<span>...</span>"/", "["<span>...</span>"]", '"/<span>...</span>/"', etc.)
+    const ipaHtmlRegex = /(["'])?([\/\[])(<span[^>]*>[\s\S]+?<\/span>)([\/\]])\1?/g;
+    text = text.replace(ipaHtmlRegex, (match, quote, open, inner, close) => {
+      // If there is a quote, preserve it outside the LTR isolate
+      if (quote) {
+        return `${quote}\u2066${open}${inner}${close}\u2069${quote}`;
+      }
+      return `\u2066${open}${inner}${close}\u2069`;
+    });
+    // Then wrap plain text IPA segments
+    const ipaPlainRegex = /([\/\[])([^\]\/<>]+)([\/\]])/g;
+    const ipaSymbolRegex = /[\u0250-\u02AF.ˈˌ|‖]/;
+    text = text.replace(ipaPlainRegex, (match, open, inner, close) => {
+      if (
+        ((open === '/' && close === '/') || (open === '[' && close === ']')) &&
+        ipaSymbolRegex.test(inner)
+      ) {
+        return `\u2066${open}${inner}${close}\u2069`;
+      }
+      return match;
+    });
+    return text;
   }
 
   // --- Page context and initialization ---
-  const checkPageContext = () => {
+  function checkPageContext() {
     try {
       return typeof mw.config.get("wgNamespaceNumber") !== "undefined" &&
         !["edit", "submit"].includes(mw.config.get("wgAction")) &&
         !document.querySelector(".ve-active, .wikiEditor-ui") &&
         !mw.config.get("wgVisualEditor")?.isActive;
-    } catch (error) {
-      console.error("Error checking page context:", error);
-      return false;
-    }
-  };
-
-  const getRequiredElements = () => {
-    const contentElement = document.querySelector("#mw-content-text");
-    const titleElement = document.querySelector(".mw-first-heading");
-    if (!contentElement || !titleElement) throw new Error("Required content elements not found");
-    return { content: contentElement, title: titleElement };
-  };
-
-  function setRadioChecked(value) {
-    const radio = document.querySelector(`.cdx-radio__input[name="rumi-jawi-ui"][value="${value}"]`);
-    if (radio) radio.checked = true;
+    } catch (error) { console.error("Error checking page context:", error); return false; }
   }
-
+  function getRequiredElements() {
+    const content = document.querySelector("#mw-content-text"), title = document.querySelector(".mw-first-heading");
+    if (!content || !title) throw new Error("Required content elements not found");
+    return { content, title };
+  }
   async function initializeApp() {
     if (State.initialized || !checkPageContext()) return;
     try {
@@ -630,30 +554,20 @@
       State.init(content, title);
       UIManager.initialize();
       TemplateManager.initialize();
-      const [dictionary, currentLanguage] = await Promise.all([
-        DictionaryManager.fetch(),
-        Promise.resolve(mw.config.get("wgUserLanguage"))
-      ]);
-      State.dictionary = dictionary;
-      const pendingScript = (typeof Storage !== 'undefined') ? sessionStorage.getItem("pendingScript") : null;
-      const isJawi = currentLanguage === "ms-arab" || pendingScript === "jawi";
+      State.dictionary = await DictionaryManager.fetch();
+      const persistentScript = typeof Storage !== 'undefined' ? localStorage.getItem("persistentScript") : null;
+      const persistentLang = typeof Storage !== 'undefined' ? localStorage.getItem("persistentLang") : null;
+      let isJawi = persistentScript ? persistentScript === "jawi" : (persistentLang || mw.config.get("wgUserLanguage")) === "ms-arab";
       State.setScript(isJawi ? "jawi" : "rumi");
       setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
+      // Remove the second setRadioChecked call for language
       if (isJawi) await Converter.convert(true);
-      if (pendingScript && typeof Storage !== 'undefined') sessionStorage.removeItem("pendingScript");
       State.initialized = true;
       DEBUG && console.log("Initialized successfully");
-    } catch (error) {
-      console.error("Initialization failed:", error);
-    }
+    } catch (error) { console.error("Initialization failed:", error); }
   }
 
-  if (typeof mw !== 'undefined' && mw.hook) {
-    mw.hook("wikipage.content").add(initializeApp);
-  }
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initializeApp);
-  } else {
-    requestAnimationFrame(initializeApp);
-  }
+  if (typeof mw !== 'undefined' && mw.hook) mw.hook("wikipage.content").add(initializeApp);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initializeApp);
+  else requestAnimationFrame(initializeApp);
 })();
