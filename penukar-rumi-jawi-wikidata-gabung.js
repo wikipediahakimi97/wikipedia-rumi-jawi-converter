@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 15th July 2025
+ ** Updated on 16th July 2025
  **
  **/
 
@@ -44,6 +44,7 @@
   };
   const PUNCTUATION_MAP = { ",": "⹁", ";": "⁏", "?": "؟" };
 
+  // --- Utility Functions ---
   const safeSetInnerHTML = (el, html) => {
     if (typeof html === 'string' && html.includes('<')) {
       const d = document.createElement('div'); d.innerHTML = html;
@@ -52,6 +53,42 @@
   };
   const safeSetTextContent = (el, txt) => { el.textContent = txt; };
   const setRadioChecked = v => document.querySelectorAll(`.cdx-radio__input[value="${v}"]`).forEach(r => r.checked = true);
+
+  function replaceHamzaWithSpan(text) {
+    if (!text) return text;
+    try {
+      const skip = ["القرءان"], force = ["چيء", "داتوء", "توء", "نيء"];
+      let map = {};
+      skip.forEach((ex, i) => {
+        const key = `__EXC${i}__`; map[key] = ex;
+        text = text.replace(new RegExp(ex, "g"), key);
+      });
+      const hamzaSpan = '<span style="vertical-align: 28%; line-height:1.0;">ء</span>';
+      force.forEach(word => {
+        const wordWithSpan = word.replace(/ء/g, hamzaSpan);
+        text = text.replace(new RegExp(word, "g"), wordWithSpan);
+      });
+      text = text.replace(/(^|[\s\(\[\{،⹁⁏؟:;,.!?-])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
+      text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
+      Object.entries(map).forEach(([k, ex]) => { text = text.replace(new RegExp(k, "g"), ex); });
+      return text;
+    } catch (error) { console.error("Error in replaceHamzaWithSpan:", error); return text; }
+  }
+
+  function wrapIPASegmentsLTR(text) {
+    if (!text) return text;
+    const ipaHtmlRegex = /(["'])?([\/\[])(<span[^>]*>[\s\S]+?<\/span>)([\/\]])\1?/g;
+    text = text.replace(ipaHtmlRegex, (match, quote, open, inner, close) =>
+      quote ? `${quote}\u2066${open}${inner}${close}\u2069${quote}` : `\u2066${open}${inner}${close}\u2069`
+    );
+    const ipaPlainRegex = /([\/\[])([^\]\/<>]+)([\/\]])/g;
+    const ipaSymbolRegex = /[\u0250-\u02AF.ˈˌ|‖]/;
+    text = text.replace(ipaPlainRegex, (match, open, inner, close) =>
+      ((open === '/' && close === '/') || (open === '[' && close === ']')) && ipaSymbolRegex.test(inner)
+        ? `\u2066${open}${inner}${close}\u2069` : match
+    );
+    return text;
+  }
 
   // --- State ---
   const State = {
@@ -156,6 +193,7 @@
         State.originalContent = State.content.innerHTML;
         State.originalTitle = State.title.textContent;
       }
+      this.preprocessKafDalWithLinks();
       this.setRTLDirection(State.content, true);
       this.setRTLDirection(State.title, true);
       let convertedTitle = this.convertText(State.title.textContent, State.dictionary);
@@ -235,9 +273,7 @@
     convertText(text, dict) {
       if (!text?.trim() || !dict) return text;
       const numbers = [];
-      // Modified regex to include Unicode letters adjacent to numbers
       let result = text.replace(/(?:\p{L}*\d+(?:[,.]\d+)*(?:\.\d+)?%?\p{L}*|\d+(?:[,.]\d+)*(?:\.\d+)?%?)/gu, m => `__NUM${numbers.push(`\u2066${m}\u2069`) - 1}__`);
-      
       const replaceByDictKeys = (str, dictObj, type) => {
         const keys = Object.keys(dictObj).filter(type).sort((a, b) => b.length - a.length);
         if (!keys.length) return str;
@@ -255,23 +291,82 @@
         }).join("-");
       });
       let singleWordRegex;
-      try { singleWordRegex = new RegExp("\\b[\\p{L}\\p{N}_]+\\b", "gu"); }
-      catch { singleWordRegex = /\b[\w\u00C0-\uFFFF]+\b/g; }
-      result = result.replace(singleWordRegex, m => {
-        const fid = dict.words[m.toLowerCase()];
-        return fid ? dict.forms[fid] : m;
+      try { 
+        singleWordRegex = new RegExp("(?<=^|[\\s\\p{P}\\p{S}])[\\p{L}\\p{N}_]+(?=[\\s\\p{P}\\p{S}]|$)", "gu"); 
+      }
+      catch { 
+        singleWordRegex = /(?:^|[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\])([\w\u00C0-\uFFFF]+)(?=[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\]|$)/g;
+      }
+      if (singleWordRegex.toString().includes("(?<=")) {
+        result = result.replace(singleWordRegex, m => {
+          const fid = dict.words[m.toLowerCase()];
+          return fid ? dict.forms[fid] : m;
+        });
+      } else {
+        result = result.replace(singleWordRegex, (match, word, offset, string) => {
+          const fid = dict.words[word.toLowerCase()];
+          const converted = fid ? dict.forms[fid] : word;
+          return match.replace(word, converted);
+        });
+      }
+      result = result.replace(/\b(ک|د)\s+(ک|د)\b/g, (match, first, second) => first === second ? `${first} ${second}` : match);
+      result = result.replace(/(^|[\s]+)([کد])\s+(\S+)/g, (match, space, letter, nextWord) => {
+        if (nextWord.startsWith("ا")) {
+          return `${space}${letter}أ${nextWord.slice(1)}`;
+        }
+        return `${space}${letter}${nextWord}`;
       });
-      result = result.replace(/(^|[\s]+)([کد])[\s]+(\S)/g, (m, s, l, n) => `${s}${l}${n === "ا" ? "أ" : n}`);
+      
       result = result.replace(/[,;?]/g, m => PUNCTUATION_MAP[m] || m);
       numbers.forEach((n, i) => { result = result.replace(`__NUM${i}__`, n); });
       return result;
     },
+    preprocessKafDalWithLinks() {
+      const walker = document.createTreeWalker(
+        State.content,
+        NodeFilter.SHOW_TEXT,
+        {
+          acceptNode: node => {
+            const parent = node.parentElement;
+            if (!parent || parent.tagName === 'A') return NodeFilter.FILTER_REJECT;
+            const text = node.textContent;
+            const hasKeDi = /\b(ke|di)\s*$/i.test(text);
+            const nextSibling = node.nextSibling;
+            if (hasKeDi && nextSibling && nextSibling.tagName === 'A') {
+              const linkText = nextSibling.textContent.trim();
+              if (!/^(ke|di)\b/i.test(linkText)) return NodeFilter.FILTER_ACCEPT;
+            }
+            return NodeFilter.FILTER_REJECT;
+          }
+        }
+      );
+      const nodesToProcess = [];
+      let node;
+      while ((node = walker.nextNode())) nodesToProcess.push(node);
+      nodesToProcess.forEach(textNode => {
+        const text = textNode.textContent;
+        const match = text.match(/^(.*?)\b(ke|di)\s*$/i);
+        if (match) {
+          const [, prefix, keDi] = match;
+          const nextLink = textNode.nextSibling;
+          if (nextLink && nextLink.tagName === 'A') {
+            const linkText = nextLink.textContent.trim();
+            if (!/^(ke|di)\b/i.test(linkText)) {
+              if (prefix.trim()) {
+                textNode.textContent = prefix;
+              } else {
+                const whitespaceMatch = prefix.match(/^\s*/);
+                textNode.textContent = whitespaceMatch ? whitespaceMatch[0] : '';
+              }
+              nextLink.textContent = `${keDi} ${linkText}`;
+            }
+          }
+        }
+      });
+    },
     setRTLDirection(el, isRTL) {
       if (!el) return;
-      
-      // Only skip setting direction if the element itself is an IPA element
       if (el.classList?.contains("IPA") || el.closest?.(".IPA")) {
-        // Remove any RTL/LTR attributes from IPA elements and their children
         el.removeAttribute("dir"); 
         el.removeAttribute("lang");
         el.querySelectorAll?.("*").forEach(child => {
@@ -280,12 +375,8 @@
         });
         return;
       }
-      
-      // For parent elements that contain IPA, set RTL but ensure IPA children remain protected
       el.setAttribute("dir", isRTL ? "rtl" : "ltr");
       el.setAttribute("lang", isRTL ? "ms-arab" : "ms");
-      
-      // After setting direction, protect any IPA descendants
       if (el.querySelector?.(".IPA")) {
         el.querySelectorAll(".IPA").forEach(ipaEl => {
           ipaEl.removeAttribute("dir");
@@ -422,30 +513,17 @@
       if (!container) { console.error(`Navigation container not found for ${skin} skin`); return; }
       document.querySelectorAll("#n-malayscriptconverter, #n-ui-language").forEach(el => el.remove());
 
-      // Create single merged control
       const scriptLi = document.createElement("li");
       scriptLi.id = "n-malayscriptconverter";
       scriptLi.className = UI.NAMESPACE_CLASS;
-      
       const persistentScript = typeof Storage !== 'undefined' ? localStorage.getItem("persistentScript") : null;
       const persistentLang = typeof Storage !== 'undefined' ? localStorage.getItem("persistentLang") : null;
       const currentLanguage = persistentLang || mw.config.get("wgUserLanguage");
-      
       const options = [
-        { 
-          value: "rumi-ui", 
-          label: "Rumi", 
-          checked: persistentScript ? persistentScript === "rumi" : (currentLanguage !== "ms-arab") 
-        },
-        { 
-          value: "jawi-ui", 
-          label: "Jawi", 
-          checked: persistentScript ? persistentScript === "jawi" : (currentLanguage === "ms-arab") 
-        }
+        { value: "rumi-ui", label: "Rumi", checked: persistentScript ? persistentScript === "rumi" : (currentLanguage !== "ms-arab") },
+        { value: "jawi-ui", label: "Jawi", checked: persistentScript ? persistentScript === "jawi" : (currentLanguage === "ms-arab") }
       ];
-      
       safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-ui", "Pilihan paparan", options));
-
       if (isMobile) {
         let menuContainer = container.querySelector(".converter-container");
         if (!menuContainer) {
@@ -464,14 +542,10 @@
         radio.addEventListener("change", async function() {
           const isJawi = this.value === "jawi-ui";
           const language = isJawi ? "ms-arab" : "ms";
-          
-          // Store both preferences
           if (typeof Storage !== 'undefined') {
             localStorage.setItem("persistentScript", isJawi ? "jawi" : "rumi");
             localStorage.setItem("persistentLang", language);
           }
-          
-          // Update UI language and reload - conversion will happen after reload
           await UIManager.setUserLanguage(language);
           window.location.reload();
         });
@@ -483,55 +557,6 @@
     },
     initialize() { this.setupStyles(); this.setupControls(); }
   };
-
-  // --- Utility: Replace hamza with styled span ---
-  function replaceHamzaWithSpan(text) {
-    if (!text) return text;
-    try {
-      const skip = ["القرءان"], force = ["چيء", "داتوء", "توء", "نيء"];
-      let map = {};
-      skip.forEach((ex, i) => {
-        const key = `__EXC${i}__`; map[key] = ex;
-        text = text.replace(new RegExp(ex, "g"), key);
-      });
-      const hamzaSpan = '<span style="vertical-align: 28%; line-height:1.0;">ء</span>';
-      force.forEach(word => {
-        const wordWithSpan = word.replace(/ء/g, hamzaSpan);
-        text = text.replace(new RegExp(word, "g"), wordWithSpan);
-      });
-      text = text.replace(/(^|[\s\(\[\{،⹁⁏؟:;,.!?-])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
-      text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
-      Object.entries(map).forEach(([k, ex]) => { text = text.replace(new RegExp(k, "g"), ex); });
-      return text;
-    } catch (error) { console.error("Error in replaceHamzaWithSpan:", error); return text; }
-  }
-
-  // --- Utility: Wrap IPASegments in LTR span ---
-  function wrapIPASegmentsLTR(text) {
-    if (!text) return text;
-    // Wrap HTML-based IPA segments with or without quotation marks (e.g., "/"<span>...</span>"/", "["<span>...</span>"]", '"/<span>...</span>/"', etc.)
-    const ipaHtmlRegex = /(["'])?([\/\[])(<span[^>]*>[\s\S]+?<\/span>)([\/\]])\1?/g;
-    text = text.replace(ipaHtmlRegex, (match, quote, open, inner, close) => {
-      // If there is a quote, preserve it outside the LTR isolate
-      if (quote) {
-        return `${quote}\u2066${open}${inner}${close}\u2069${quote}`;
-      }
-      return `\u2066${open}${inner}${close}\u2069`;
-    });
-    // Then wrap plain text IPA segments
-    const ipaPlainRegex = /([\/\[])([^\]\/<>]+)([\/\]])/g;
-    const ipaSymbolRegex = /[\u0250-\u02AF.ˈˌ|‖]/;
-    text = text.replace(ipaPlainRegex, (match, open, inner, close) => {
-      if (
-        ((open === '/' && close === '/') || (open === '[' && close === ']')) &&
-        ipaSymbolRegex.test(inner)
-      ) {
-        return `\u2066${open}${inner}${close}\u2069`;
-      }
-      return match;
-    });
-    return text;
-  }
 
   // --- Page context and initialization ---
   function checkPageContext() {
@@ -560,7 +585,6 @@
       let isJawi = persistentScript ? persistentScript === "jawi" : (persistentLang || mw.config.get("wgUserLanguage")) === "ms-arab";
       State.setScript(isJawi ? "jawi" : "rumi");
       setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
-      // Remove the second setRadioChecked call for language
       if (isJawi) await Converter.convert(true);
       State.initialized = true;
       DEBUG && console.log("Initialized successfully");
