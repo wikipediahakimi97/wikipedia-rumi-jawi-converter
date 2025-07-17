@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 16th July 2025
+ ** Updated on 17th July 2025
  **
  **/
 
@@ -153,9 +153,7 @@
       if (!State.dictionary) State.dictionary = await DictionaryManager.fetch();
       TemplateManager.collectOverrides();
       TemplateManager.convert(toJawi);
-
       const updateNodes = (sel, cb) => document.querySelectorAll(sel).forEach(cb);
-
       updateNodes('.convertible-text', el => {
         if (el.closest('.IPA')) return;
         const rumi = el.getAttribute('data-rumi');
@@ -175,7 +173,6 @@
         safeSetInnerHTML(el, txt);
         this.setRTLDirection(el, toJawi);
       });
-
       if (toJawi) {
         await this.convertToJawi();
         updateNodes(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`, el => {
@@ -200,7 +197,6 @@
       let convertedTitle = this.convertText(State.title.textContent, State.dictionary);
       convertedTitle = replaceHamzaWithSpan(wrapIPASegmentsLTR(convertedTitle));
       safeSetInnerHTML(State.title, convertedTitle);
-
       const walker = document.createTreeWalker(
         State.content, NodeFilter.SHOW_TEXT, {
           acceptNode: node => {
@@ -218,7 +214,6 @@
       );
       const textNodes = [];
       let node; while ((node = walker.nextNode())) textNodes.push(node);
-
       let idx = 0, chunk = 50;
       const processChunk = () => {
         for (let i = idx; i < Math.min(idx + chunk, textNodes.length); i++) {
@@ -226,16 +221,17 @@
           if (n && n.textContent && n.textContent.trim()) {
             let converted = this.convertText(n.textContent, State.dictionary);
             converted = replaceHamzaWithSpan(wrapIPASegmentsLTR(converted));
-            if (converted !== n.textContent && (/<span[^>]*>ء<\/span>/.test(converted) || /<span dir="ltr"/.test(converted))) {
+            const originalParent = n.parentElement;
+            if (converted !== n.textContent) {
               const span = document.createElement("span");
               safeSetInnerHTML(span, converted);
               n.parentNode && n.parentNode.replaceChild(span, n);
-            } else n.textContent = converted;
-            let p = n.parentElement;
+            }
+            let p = originalParent;
             while (p && !p.classList.contains("mw-content-text")) {
               if (p.nodeType === 1 && 
                   !p.classList.contains(UI.NOCONVERT_CLASS) && 
-                  p.closest("#mw-content-text") &&
+                  p.closest("#mw-content-text .mw-parser-output") &&
                   !p.classList.contains("IPA") && 
                   !p.closest(".IPA")) {
                 Converter.setRTLDirection(p, true);
@@ -248,7 +244,6 @@
         if (idx < textNodes.length) requestAnimationFrame(processChunk);
       };
       requestAnimationFrame(processChunk);
-
       document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`)
         .forEach(el => {
           if (el.closest('.IPA')) return;
@@ -274,7 +269,7 @@
     convertText(text, dict) {
       if (!text?.trim() || !dict) return text;
       const numbers = [];
-      let result = text.replace(/(?:\p{L}*\d+(?:[,.]\d+)*(?:\.\d+)?%?\p{L}*|\d+(?:[,.]\d+)*(?:\.\d+)?%?)/gu, m => `__NUM${numbers.push(`\u2066${m}\u2069`) - 1}__`);
+      let result = text.replace(/\d{1,2}:\d{2}(?::\d{2})?|\p{L}*\d+(?:[,.]\d+)*(?:\.\d+)?%?\p{L}*|\d+(?:[,.]\d+)*(?:\.\d+)?%?/gu, m => `__NUM${numbers.push(`\u2066${m}\u2069`) - 1}__`);
       const replaceByDictKeys = (str, dictObj, type) => {
         const keys = Object.keys(dictObj).filter(type).sort((a, b) => b.length - a.length);
         if (!keys.length) return str;
@@ -317,7 +312,6 @@
         }
         return `${space}${letter}${nextWord}`;
       });
-      
       result = result.replace(/[,;?]/g, m => PUNCTUATION_MAP[m] || m);
       numbers.forEach((n, i) => { result = result.replace(`__NUM${i}__`, n); });
       return result;
@@ -590,7 +584,7 @@
     } catch (error) { console.error("Error checking page context:", error); return false; }
   }
   function getRequiredElements() {
-    const content = document.querySelector("#mw-content-text"), title = document.querySelector(".mw-first-heading");
+    const content = document.querySelector("#mw-content-text .mw-parser-output"), title = document.querySelector(".mw-first-heading");
     if (!content || !title) throw new Error("Required content elements not found");
     return { content, title };
   }
@@ -613,7 +607,6 @@
       DEBUG && console.log("Initialized successfully");
     } catch (error) { console.error("Initialization failed:", error); }
   }
-
   if (typeof mw !== 'undefined' && mw.hook) mw.hook("wikipage.content").add(initializeApp);
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initializeApp);
   else requestAnimationFrame(initializeApp);
