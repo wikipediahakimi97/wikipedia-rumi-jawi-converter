@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 17th July 2025
+ ** Updated on 27th July 2025
  **
  **/
 
@@ -17,7 +17,7 @@
 */
 
 (() => {
-  // --- Constants & Utilities ---
+  // --- Constants ---
   const CACHE_KEY = "rumiJawiData", CACHE_DURATION = 3600000, DEBUG = false;
   const SPARQL_URL = "https://query-main.wikidata.org/sparql";
   const SPARQL_QUERY = `SELECT DISTINCT ?formId ?latn ?arab (GROUP_CONCAT(DISTINCT ?featureLabel; SEPARATOR=", ") AS ?features) 
@@ -34,114 +34,235 @@
     }
     GROUP BY ?formId ?latn ?arab`;
 
-  const UI = {
+  const CONFIG = {
     TEMPLATE_CLASS: "mw-explicit-form-mapping",
     NOCONVERT_CLASS: "mw-no-convert-text",
     TEMPLATE_DATA_ATTR: "data-form-id",
     TEMPLATE_ORIG_TEXT_ATTR: "data-rumi-text",
     SUPPORTED_SKINS: ["vector-2022", "vector", "monobook", "timeless", "minerva"],
-    NAMESPACE_CLASS: "mw-list-item"
+    NAMESPACE_CLASS: "mw-list-item",
+    SKIP_CLASSES: ["IPA", "chemf", "barelink", "number"],
+    PUNCTUATION_MAP: { ",": "⹁", ";": "⁏", "?": "؟" }
   };
-  const PUNCTUATION_MAP = { ",": "⹁", ";": "⁏", "?": "؟" };
 
-  // --- Utility Functions ---
-  const safeSetInnerHTML = (el, html) => {
-    if (typeof html === 'string' && html.includes('<')) {
-      const d = document.createElement('div'); d.innerHTML = html;
-      el.innerHTML = ''; while (d.firstChild) el.appendChild(d.firstChild);
-    } else el.textContent = html;
+  // --- Utilities ---
+  const DOM = {
+    setContent: (el, content, isHTML = false) => isHTML ? (el.innerHTML = content) : (el.textContent = content),
+    setDirection: (el, isRTL) => {
+      if (!el) return;
+      if ((el.nodeName === "SUB" || el.nodeName === "SUP") && el.getAttribute("id")) {
+        el.setAttribute("dir", "ltr");
+        return;
+      }
+      el.setAttribute("dir", isRTL ? "rtl" : "ltr");
+      el.setAttribute("lang", isRTL ? "ms-arab" : "ms");
+    },
+    hasSkipClass: (el) => CONFIG.SKIP_CLASSES.some(cls => el.classList?.contains(cls)),
+    isSkippableElement: (el) => {
+      if (!el) return true;
+      return el.tagName === 'SPAN' && (DOM.hasSkipClass(el) || 
+        el.classList.contains(CONFIG.NOCONVERT_CLASS) || 
+        el.classList.contains(CONFIG.TEMPLATE_CLASS));
+    },
+    createWalker: (root, acceptNode) => document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode }),
+    collectNodes: (walker) => {
+      const nodes = [];
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) nodes.push(node);
+      return nodes;
+    }
   };
-  const safeSetTextContent = (el, txt) => { el.textContent = txt; };
-  const setRadioChecked = v => document.querySelectorAll(`.cdx-radio__input[value="${v}"]`).forEach(r => r.checked = true);
 
-  function replaceHamzaWithSpan(text) {
-    if (!text) return text;
-    try {
-      const skip = ["القرءان"], force = ["چيء", "داتوء", "توء", "نيء"];
-      let map = {};
-      skip.forEach((ex, i) => {
-        const key = `__EXC${i}__`; map[key] = ex;
-        text = text.replace(new RegExp(ex, "g"), key);
-      });
-      const hamzaSpan = '<span style="vertical-align: 28%; line-height:1.0;">ء</span>';
-      force.forEach(word => {
-        const wordWithSpan = word.replace(/ء/g, hamzaSpan);
-        text = text.replace(new RegExp(word, "g"), wordWithSpan);
-      });
-      text = text.replace(/(^|[\s\(\[\{،⹁⁏؟:;,.!?-])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
-      text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (m, p1) => p1 + hamzaSpan);
-      Object.entries(map).forEach(([k, ex]) => { text = text.replace(new RegExp(k, "g"), ex); });
-      return text;
-    } catch (error) { console.error("Error in replaceHamzaWithSpan:", error); return text; }
-  }
+  const Storage = {
+    get: (key) => typeof window.Storage !== 'undefined' ? localStorage.getItem(key) : null,
+    set: (key, value) => typeof window.Storage !== 'undefined' && localStorage.setItem(key, value)
+  };
 
-  function wrapIPASegmentsLTR(text) {
+  // --- Text Processing ---
+  function enhanceText(text) {
     if (!text) return text;
-    const ipaHtmlRegex = /(["'])?([\/\[])(<span[^>]*>[\s\S]+?<\/span>)([\/\]])\1?/g;
-    text = text.replace(ipaHtmlRegex, (match, quote, open, inner, close) =>
-      quote ? `${quote}\u2066${open}${inner}${close}\u2069${quote}` : `\u2066${open}${inner}${close}\u2069`
+    
+    // Handle hamza with exceptions
+    const exceptions = { skip: ["القرءان"], force: ["چيء", "داتوء", "توء", "نيء"] };
+    let tempMap = {};
+    
+    exceptions.skip.forEach((ex, i) => {
+      const key = `__EXC${i}__`;
+      tempMap[key] = ex;
+      text = text.replaceAll(ex, key);
+    });
+    
+    const hamzaSpan = '<span class="hamza-span">ء</span>';
+    exceptions.force.forEach(word => text = text.replaceAll(word, word.replace(/ء/g, hamzaSpan)));
+    
+    text = text.replace(/([\s"'"'{\(\[<])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan);
+    text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan);
+    
+    Object.entries(tempMap).forEach(([k, ex]) => text = text.replaceAll(k, ex));
+    
+    // Handle IPA segments
+    text = text.replace(/(["'])?([\/\[])(<span[^>]*>[\s\S]+?<\/span>)([\/\]])\1?/g,
+      (m, quote, open, inner, close) =>
+        quote ? `${quote}\u2066${open}${inner}${close}\u2069${quote}` : `\u2066${open}${inner}${close}\u2069`
     );
-    const ipaPlainRegex = /([\/\[])([^\]\/<>]+)([\/\]])/g;
-    const ipaSymbolRegex = /[\u0250-\u02AF.ˈˌ|‖]/;
-    text = text.replace(ipaPlainRegex, (match, open, inner, close) =>
-      ((open === '/' && close === '/') || (open === '[' && close === ']')) && ipaSymbolRegex.test(inner)
-        ? `\u2066${open}${inner}${close}\u2069` : match
+    text = text.replace(/([\/\[])([^\]\/<>]+)([\/\]])/g, (m, open, inner, close) =>
+      ((open === '/' && close === '/') || (open === '[' && close === ']')) && /[\u0250-\u02AF.ˈˌ|‖]/.test(inner)
+        ? `\u2066${open}${inner}${close}\u2069` : m
     );
+    
     return text;
   }
 
-  // --- State ---
+  function isChemicalElement(textNode, subSupNode) {
+    if (!textNode || !subSupNode || textNode.nodeType !== Node.TEXT_NODE) return false;
+    if (!["SUB", "SUP"].includes(subSupNode.nodeName)) return false;
+    const txt = textNode.textContent.trim(), subSupText = subSupNode.textContent.trim();
+    const hasId = subSupNode.getAttribute?.("id");
+    // More comprehensive chemical patterns including compounds, Greek prefixes, and parenthetical groups
+    const chemPatterns = [
+      /^[A-Z][a-z]?$/, // Simple elements: Al, O, H
+      /^[α-ω]-[A-Z][a-z]*$/, // Greek prefixes: α-Al, β-Fe
+      /^[A-Z][a-z]?[0-9]*$/, // Elements with numbers: Al2, O3
+      /^\([A-Z][a-z]?[0-9]*\)$/, // Parenthetical elements: (H), (Al)
+      /^[A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*$/, // Simple compounds: Al2O3, H2S
+      /^\([A-Z][a-z]?[0-9]*\)[0-9]*$/, // Parenthetical with numbers: (NH4)2
+      /^\([A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*\)$/, // Parenthetical compounds: (H2S)
+      /^[α-ω]-[A-Z][a-z]*[0-9]*[A-Z][a-z]*[0-9]*$/ // Greek prefix compounds: α-Al2O3
+    ];
+    return chemPatterns.some(pattern => pattern.test(txt)) && hasId && /^(\d+)([+-])?$/.test(subSupText);
+  }
+
+  function wrapSpecialElements() {
+    // Wrap chemical formulas
+    const chemWalker = DOM.createWalker(document.body, node => {
+      const parent = node.parentElement;
+      if (!parent || parent.classList.contains('chemf')) return NodeFilter.FILTER_REJECT;
+      return node.nextSibling && isChemicalElement(node, node.nextSibling) ? 
+        NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    });
+    
+    const processedNodes = new Set();
+    const textNodes = DOM.collectNodes(chemWalker);
+    
+    for (const textNode of textNodes) {
+      if (processedNodes.has(textNode)) continue;
+      
+      const consecutiveElements = [];
+      let currentNode = textNode;
+      
+      // More comprehensive chemical element validation including compounds and Greek prefixes
+      const textContent = currentNode.textContent.trim();
+      const isValidChemElement = /^(?:[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*|\([A-Z][a-z]?[0-9]*\)[0-9]*|\([A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*\)|[A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*[A-Z][a-z]*[0-9]*)$/.test(textContent);
+      if (!isValidChemElement) continue;
+      
+      while (currentNode?.nextSibling && isChemicalElement(currentNode, currentNode.nextSibling)) {
+        consecutiveElements.push({ text: currentNode, subSup: currentNode.nextSibling });
+        currentNode = currentNode.nextSibling.nextSibling;
+        
+        // Skip whitespace nodes
+        while (currentNode?.nodeType === Node.TEXT_NODE && !currentNode.textContent.trim()) {
+          currentNode = currentNode.nextSibling;
+        }
+        
+        // Stop if we encounter a text node that's not a chemical element
+        if (currentNode?.nodeType === Node.TEXT_NODE) {
+          const nextText = currentNode.textContent.trim();
+          // More comprehensive validation for next chemical element
+          const isNextValidChem = /^(?:[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*|\([A-Z][a-z]?[0-9]*\)[0-9]*|\([A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*\)|[A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*[A-Z][a-z]*[0-9]*)$/.test(nextText);
+          if (!isNextValidChem) {
+            break;
+          }
+        }
+      }
+      
+      if (consecutiveElements.length) {
+        const wrapper = document.createElement('span');
+        wrapper.className = 'chemf';
+        consecutiveElements[0].text.parentNode.insertBefore(wrapper, consecutiveElements[0].text);
+        
+        for (const element of consecutiveElements) {
+          wrapper.appendChild(element.text);
+          wrapper.appendChild(element.subSup);
+          processedNodes.add(element.text);
+        }
+      }
+    }
+    
+    // Wrap bare links
+    const linkWalker = DOM.createWalker(document.body, node => {
+      const parent = node.parentElement;
+      return (!parent || parent.classList.contains('barelink')) ? NodeFilter.FILTER_REJECT :
+        /^https?:\/\/\S+$/.test(node.textContent.trim()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    });
+    
+    for (const node of DOM.collectNodes(linkWalker)) {
+      const wrapper = document.createElement('span');
+      wrapper.className = 'barelink';
+      wrapper.textContent = node.textContent.trim();
+      node.parentNode.replaceChild(wrapper, node);
+    }
+  }
+
+  // --- State & Data Management ---
   const State = {
-    script: "rumi", content: null, title: null, originalContent: null, originalTitle: null,
-    dictionary: null, templateOverrides: new Map(), initialized: false,
-    init(content, title) { this.content = content; this.title = title; return this; },
-    setScript(script) { this.script = script; return this; }
+    script: "rumi", dictionary: null, templateOverrides: new Map(), initialized: false,
+    content: null, title: null, originalContent: null, originalTitle: null,
+    
+    init(content, title) {
+      this.content = content;
+      this.title = title;
+      return this;
+    },
+    
+    setScript(script) {
+      this.script = script;
+      return this;
+    }
   };
 
-  // --- Dictionary ---
   const DictionaryManager = {
-    async fetch() { return this.loadFromCache() || await this.fetchFromAPI(); },
+    async fetch() {
+      return this.loadFromCache() || await this.fetchFromAPI();
+    },
+    
     loadFromCache() {
-      try {
-        if (typeof Storage === 'undefined') return null;
-        const cached = localStorage.getItem(CACHE_KEY);
-        if (cached) {
-          const { timestamp, data } = JSON.parse(cached);
-          if (Date.now() - timestamp < CACHE_DURATION) return data;
-        }
-      } catch (e) { DEBUG && console.warn("Cache access error:", e); }
+      const cached = Storage.get(CACHE_KEY);
+      if (cached) {
+        const { timestamp, data } = JSON.parse(cached);
+        if (Date.now() - timestamp < CACHE_DURATION) return data;
+      }
       return null;
     },
+    
     async fetchFromAPI() {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 30000);
+        setTimeout(() => controller.abort(), 30000);
+        
         const response = await fetch(
           `${SPARQL_URL}?query=${encodeURIComponent(SPARQL_QUERY)}&format=json`,
           { headers: { Accept: "application/sparql-results+json" }, signal: controller.signal }
         );
-        clearTimeout(timeoutId);
+        
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         const processedData = this.process(result);
-        try {
-          if (typeof Storage !== 'undefined')
-            localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: processedData }));
-        } catch (e) { DEBUG && console.warn("Error storing in localStorage:", e); }
+        
+        Storage.set(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: processedData }));
         return processedData;
-      } catch (error) {
-        console.error("Error fetching Rumi-Jawi data:", error);
+      } catch {
         return { words: {}, phrases: {}, forms: {}, formMappings: {} };
       }
     },
+    
     process(data) {
       const dict = { words: {}, phrases: {}, forms: {}, formMappings: {} };
-      data?.results?.bindings?.forEach(({ formId, latn, arab }) => {
-        if (!formId || !latn || !arab) return;
+      for (const { formId, latn, arab } of data?.results?.bindings ?? []) {
+        if (!formId || !latn || !arab) continue;
         const rumi = latn.value.toLowerCase(), jawi = arab.value, fid = formId.value;
-        dict.forms[fid] = jawi; dict.formMappings[fid] = rumi;
+        dict.forms[fid] = jawi;
+        dict.formMappings[fid] = rumi;
         (rumi.includes(" ") ? dict.phrases : dict.words)[rumi] = fid;
-      });
+      }
       return dict;
     }
   };
@@ -150,90 +271,87 @@
   const Converter = {
     async convert(toJawi) {
       if (!State.dictionary) State.dictionary = await DictionaryManager.fetch();
-      TemplateManager.collectOverrides();
-      TemplateManager.convert(toJawi);
-      const updateNodes = (sel, cb) => document.querySelectorAll(sel).forEach(cb);
-      updateNodes('.convertible-text', el => {
-        if (el.closest('.IPA')) return;
-        const rumi = el.getAttribute('data-rumi');
-        if (rumi) {
-          let txt = toJawi ? this.convertText(rumi, State.dictionary) : rumi;
-          if (toJawi) txt = replaceHamzaWithSpan(wrapIPASegmentsLTR(txt));
-          safeSetInnerHTML(el, txt);
-          this.setRTLDirection(el, toJawi);
-        }
-      });
-      updateNodes('.vector-toc-text', el => {
-        if (el.closest('.IPA')) return;
+      
+      TemplateManager.process(toJawi);
+      
+      const convertibleEls = [
+        ...document.querySelectorAll('.convertible-text'),
+        ...document.querySelectorAll('.vector-toc-text')
+      ];
+      
+      for (const el of convertibleEls) {
+        if (DOM.isSkippableElement(el)) continue;
+        
         if (!el.hasAttribute('data-rumi')) el.setAttribute('data-rumi', el.textContent);
         const rumi = el.getAttribute('data-rumi');
         let txt = toJawi ? this.convertText(rumi, State.dictionary) : rumi;
-        if (toJawi) txt = replaceHamzaWithSpan(wrapIPASegmentsLTR(txt));
-        safeSetInnerHTML(el, txt);
-        this.setRTLDirection(el, toJawi);
-      });
+        if (toJawi) txt = enhanceText(txt);
+        
+        DOM.setContent(el, txt, true);
+        DOM.setDirection(el, toJawi);
+      }
+      
       if (toJawi) {
         await this.convertToJawi();
-        updateNodes(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`, el => {
-          if (el.closest('.IPA')) return;
-          safeSetInnerHTML(el, replaceHamzaWithSpan(wrapIPASegmentsLTR(el.textContent)));
-        });
-        updateNodes("*:not(script):not(style)", el => {
-          if (el.closest('.IPA')) return;
-          if (el.childNodes.length === 1 && el.childNodes[0].nodeType === Node.TEXT_NODE && el.textContent.includes("ء"))
-            safeSetInnerHTML(el, replaceHamzaWithSpan(wrapIPASegmentsLTR(el.textContent)));
-        });
-      } else this.revertToRumi();
+        this.handleTableStyles(true);
+      } else {
+        this.revertToRumi();
+        this.handleTableStyles(false);
+      }
     },
+    
     async convertToJawi() {
       if (!State.originalContent) {
         State.originalContent = State.content.innerHTML;
         State.originalTitle = State.title.textContent;
       }
-      this.preprocessKafDalWithLinks();
-      this.setRTLDirection(State.content, true);
-      this.setRTLDirection(State.title, true);
+      
+      this.preprocessKafDal();
+      DOM.setDirection(State.content, true);
+      DOM.setDirection(State.title, true);
+      
       let convertedTitle = this.convertText(State.title.textContent, State.dictionary);
-      convertedTitle = replaceHamzaWithSpan(wrapIPASegmentsLTR(convertedTitle));
-      safeSetInnerHTML(State.title, convertedTitle);
-      const walker = document.createTreeWalker(
-        State.content, NodeFilter.SHOW_TEXT, {
-          acceptNode: node => {
-            const p = node.parentElement;
-            if (!p) return NodeFilter.FILTER_REJECT;
-            if (["SCRIPT", "STYLE"].includes(p.tagName) ||
-              p.classList.contains(UI.NOCONVERT_CLASS) ||
-              p.classList.contains(UI.TEMPLATE_CLASS) ||
-              p.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header") ||
-              p.classList.contains("IPA") || p.closest(".IPA"))
-              return NodeFilter.FILTER_REJECT;
-            return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-          }
+      DOM.setContent(State.title, enhanceText(convertedTitle), true);
+      
+      const walker = DOM.createWalker(State.content, node => {
+        const p = node.parentElement;
+        if (!p || ["SCRIPT", "STYLE"].includes(p.tagName)) return NodeFilter.FILTER_REJECT;
+        if (p.closest("#p-navigation, .mw-portlet, .vector-menu, .mw-header")) return NodeFilter.FILTER_REJECT;
+        
+        let currentElement = p;
+        while (currentElement && currentElement !== State.content) {
+          if (DOM.isSkippableElement(currentElement)) return NodeFilter.FILTER_REJECT;
+          currentElement = currentElement.parentElement;
         }
-      );
-      const textNodes = [];
-      let node; while ((node = walker.nextNode())) textNodes.push(node);
+        
+        return node.textContent.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      });
+      
+      const textNodes = DOM.collectNodes(walker);
       let idx = 0, chunk = 50;
+      
       const processChunk = () => {
         for (let i = idx; i < Math.min(idx + chunk, textNodes.length); i++) {
           const n = textNodes[i];
-          if (n && n.textContent && n.textContent.trim()) {
+          if (n?.textContent?.trim()) {
             let converted = this.convertText(n.textContent, State.dictionary);
-            converted = replaceHamzaWithSpan(wrapIPASegmentsLTR(converted));
-            const originalParent = n.parentElement;
+            converted = enhanceText(converted);
+            
             if (converted !== n.textContent) {
-              const span = document.createElement("span");
-              safeSetInnerHTML(span, converted);
-              n.parentNode && n.parentNode.replaceChild(span, n);
+              // Only replace the text content, don't wrap in span if not necessary
+              if (converted.includes('<span')) {
+                const span = document.createElement("span");
+                DOM.setContent(span, converted, true);
+                n.parentNode?.replaceChild(span, n);
+              } else {
+                n.textContent = converted;
+              }
             }
-            let p = originalParent;
+            
+            let p = n.parentElement;
             while (p && !p.classList.contains("mw-content-text")) {
-              if (p.nodeType === 1 && 
-                  !p.classList.contains(UI.NOCONVERT_CLASS) && 
-                  p.closest("#mw-content-text .mw-parser-output") &&
-                  !p.classList.contains("IPA") && 
-                  !p.closest(".IPA")) {
-                Converter.setRTLDirection(p, true);
+              if (p.nodeType === 1 && p.closest("#mw-content-text .mw-parser-output") && !DOM.isSkippableElement(p)) {
+                DOM.setDirection(p, true);
               }
               p = p.parentElement;
             }
@@ -242,41 +360,48 @@
         idx += chunk;
         if (idx < textNodes.length) requestAnimationFrame(processChunk);
       };
+      
       requestAnimationFrame(processChunk);
-      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}, .${UI.NOCONVERT_CLASS}`)
-        .forEach(el => {
-          if (el.closest('.IPA')) return;
-          safeSetInnerHTML(el, replaceHamzaWithSpan(wrapIPASegmentsLTR(el.textContent)));
-        });
     },
+    
     revertToRumi() {
       if (State.originalContent) {
         State.content.innerHTML = State.originalContent;
-        safeSetTextContent(State.title, State.originalTitle);
-        this.setRTLDirection(State.content, false);
-        this.setRTLDirection(State.title, false);
-        State.content.querySelectorAll("[dir=\"rtl\"]").forEach(el => {
-          el.removeAttribute("dir"); el.removeAttribute("lang");
-        });
+        DOM.setContent(State.title, State.originalTitle);
+        DOM.setDirection(State.content, false);
+        DOM.setDirection(State.title, false);
         State.originalContent = State.originalTitle = null;
       }
-      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(el => {
-        const rumi = el.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR);
-        if (rumi) { safeSetInnerHTML(el, rumi); Converter.setRTLDirection(el, false); }
-      });
+      
+      for (const el of document.querySelectorAll(`.${CONFIG.TEMPLATE_CLASS}`)) {
+        const rumi = el.getAttribute(CONFIG.TEMPLATE_ORIG_TEXT_ATTR);
+        if (rumi) {
+          DOM.setContent(el, rumi, true);
+          DOM.setDirection(el, false);
+        }
+      }
     },
+    
     convertText(text, dict) {
       if (!text?.trim() || !dict) return text;
+      
       const numbers = [];
-      let result = text.replace(/\d{1,2}:\d{2}(?::\d{2})?|\p{L}*\d+(?:[,.]\d+)*(?:\.\d+)?%?\p{L}*|\d+(?:[,.]\d+)*(?:\.\d+)?%?/gu, m => `__NUM${numbers.push(`\u2066${m}\u2069`) - 1}__`);
-      const replaceByDictKeys = (str, dictObj, type) => {
-        const keys = Object.keys(dictObj).filter(type).sort((a, b) => b.length - a.length);
+      let result = text.replace(
+        /(?:^|(?<=\s))([+\-*/^]?)(?:\d{1,2}:\d{2}(?::\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?%?|\d+(?:[.,]\d+)?%?)([+\-*/^]?)(?=\s|$|[^\d.,])/g,
+        m => `__NUM${numbers.push(`<span class="number">${m.trim()}</span>`) - 1}__`
+      );
+      
+      const replaceByDict = (str, dictObj, filter = () => true) => {
+        const keys = Object.keys(dictObj).filter(filter).sort((a, b) => b.length - a.length);
         if (!keys.length) return str;
         const regex = new RegExp(keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"), "gi");
         return str.replace(regex, m => dict.forms[dictObj[m.toLowerCase()]] || m);
       };
-      result = replaceByDictKeys(result, dict.phrases, () => true);
-      result = replaceByDictKeys(result, dict.words, w => w.includes("'"));
+      
+      result = replaceByDict(result, dict.phrases);
+      result = replaceByDict(result, dict.words, w => w.includes("'"));
+      
+      // Handle hyphenated words
       result = result.replace(/\b\w+(?:-\w+)+\b/g, m => {
         const fid = dict.words[m.toLowerCase()];
         if (fid) return dict.forms[fid];
@@ -285,306 +410,338 @@
           return pfid ? dict.forms[pfid] : part;
         }).join("-");
       });
-      let singleWordRegex;
-      try { 
-        singleWordRegex = new RegExp("(?<=^|[\\s\\p{P}\\p{S}])[\\p{L}\\p{N}_]+(?=[\\s\\p{P}\\p{S}]|$)", "gu"); 
-      }
-      catch { 
-        singleWordRegex = /(?:^|[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\])([\w\u00C0-\uFFFF]+)(?=[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\]|$)/g;
-      }
-      if (singleWordRegex.toString().includes("(?<=")) {
-        result = result.replace(singleWordRegex, m => {
-          const fid = dict.words[m.toLowerCase()];
-          return fid ? dict.forms[fid] : m;
-        });
-      } else {
-        result = result.replace(singleWordRegex, (match, word, offset, string) => {
-          const fid = dict.words[word.toLowerCase()];
-          const converted = fid ? dict.forms[fid] : word;
-          return match.replace(word, converted);
-        });
-      }
-      result = result.replace(/\b(ک|د)\s+(ک|د)\b/g, (match, first, second) => first === second ? `${first} ${second}` : match);
-      result = result.replace(/(^|[\s]+)([کد])\s+(\S+)/g, (match, space, letter, nextWord) => {
-        if (nextWord.startsWith("ا")) {
-          return `${space}${letter}أ${nextWord.slice(1)}`;
-        }
-        return `${space}${letter}${nextWord}`;
+      
+      // Handle single words
+      const singleWordRegex = /(?:^|[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\])([\w\u00C0-\uFFFF]+)(?=[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\]|$)/g;
+      result = result.replace(singleWordRegex, (match, word) => {
+        const fid = dict.words[word.toLowerCase()];
+        const converted = fid ? dict.forms[fid] : word;
+        return match.replace(word, converted);
       });
-      result = result.replace(/[,;?]/g, m => PUNCTUATION_MAP[m] || m);
-      numbers.forEach((n, i) => { result = result.replace(`__NUM${i}__`, n); });
+      
+      // Handle specific patterns
+      result = result.replace(/\b(ک|د)\s+(ک|د)\b/g, (match, first, second) => 
+        first === second ? `${first} ${second}` : match);
+      result = result.replace(/(^|[\s]+)([کد])\s+(\S+)/g, (match, space, letter, nextWord) =>
+        nextWord.startsWith("ا") ? `${space}${letter}أ${nextWord.slice(1)}` : `${space}${letter}${nextWord}`);
+      
+      // Handle punctuation with proper spacing - preserve existing whitespace
+      result = result.replace(/([,;?])(\s*)/g, (match, punct, space) => {
+        const replacement = CONFIG.PUNCTUATION_MAP[punct] || punct;
+        return replacement + space;
+      });
+      
+      numbers.forEach((n, i) => result = result.replace(`__NUM${i}__`, n));
       return result;
     },
-    preprocessKafDalWithLinks() {
-      const walker = document.createTreeWalker(
-        State.content,
-        NodeFilter.SHOW_TEXT,
-        {
-          acceptNode: node => {
-            const parent = node.parentElement;
-            if (!parent || parent.tagName === 'A') return NodeFilter.FILTER_REJECT;
-            const text = node.textContent;
-            const hasKeDi = /\b(ke|di)\s*$/i.test(text);
-            const nextSibling = node.nextSibling;
-            if (hasKeDi && nextSibling && nextSibling.tagName === 'A') {
-              const linkText = nextSibling.textContent.trim();
-              if (!/^(ke|di)\b/i.test(linkText)) return NodeFilter.FILTER_ACCEPT;
-            }
-            return NodeFilter.FILTER_REJECT;
-          }
-        }
-      );
-      const nodesToProcess = [];
-      let node;
-      while ((node = walker.nextNode())) nodesToProcess.push(node);
-      nodesToProcess.forEach(textNode => {
-        const text = textNode.textContent;
-        const match = text.match(/^(.*?)\b(ke|di)\s*$/i);
+    
+    preprocessKafDal() {
+      const walker = DOM.createWalker(State.content, node => {
+        const parent = node.parentElement;
+        if (!parent || parent.tagName === 'A') return NodeFilter.FILTER_REJECT;
+        // Only match when "ke" or "di" are standalone words at the end, not part of other words like "Ke"
+        const hasKeDi = /\b(ke|di)\s+$/i.test(node.textContent);
+        const nextSibling = node.nextSibling;
+        return hasKeDi && nextSibling?.tagName === 'A' && 
+          !/^(ke|di)\b/i.test(nextSibling.textContent.trim()) ? 
+          NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      });
+      
+      for (const node of DOM.collectNodes(walker)) {
+        const match = node.textContent.match(/^(.*?)\b(ke|di)\s+$/i);
         if (match) {
           const [, prefix, keDi] = match;
-          const nextLink = textNode.nextSibling;
-          if (nextLink && nextLink.tagName === 'A') {
-            const linkText = nextLink.textContent.trim();
-            if (!/^(ke|di)\b/i.test(linkText)) {
-              if (prefix.trim()) {
-                textNode.textContent = prefix;
-              } else {
-                const whitespaceMatch = prefix.match(/^\s*/);
-                textNode.textContent = whitespaceMatch ? whitespaceMatch[0] : '';
-              }
-              nextLink.textContent = `${keDi} ${linkText}`;
-            }
+          const nextLink = node.nextSibling;
+          if (nextLink?.tagName === 'A') {
+            node.textContent = prefix;
+            nextLink.textContent = `${keDi} ${nextLink.textContent.trim()}`;
           }
         }
-      });
-    },
-    setRTLDirection(el, isRTL) {
-      if (!el) return;
-      if (el.classList?.contains("IPA") || el.closest?.(".IPA")) {
-        el.removeAttribute("dir"); 
-        el.removeAttribute("lang");
-        el.querySelectorAll?.("*").forEach(child => {
-          child.removeAttribute("dir"); 
-          child.removeAttribute("lang");
-        });
-        return;
       }
-      el.setAttribute("dir", isRTL ? "rtl" : "ltr");
-      el.setAttribute("lang", isRTL ? "ms-arab" : "ms");
-      if (el.querySelector?.(".IPA")) {
-        el.querySelectorAll(".IPA").forEach(ipaEl => {
-          ipaEl.removeAttribute("dir");
-          ipaEl.removeAttribute("lang");
-          ipaEl.querySelectorAll("*").forEach(child => {
-            child.removeAttribute("dir");
-            child.removeAttribute("lang");
-          });
-        });
+    },
+    
+    handleTableStyles(toJawi) {
+      const elements = document.querySelectorAll('table, table *');
+      for (const element of elements) {
+        if (element.className && /clade-\w+/i.test(element.className) && element.style) {
+          if (toJawi) {
+            const borderLeft = element.style.borderLeft;
+            const borderRight = element.style.borderRight;
+            if (!element.hasAttribute('data-original-border-left')) {
+              element.setAttribute('data-original-border-left', borderLeft || '');
+              element.setAttribute('data-original-border-right', borderRight || '');
+            }
+            element.style.borderLeft = borderRight;
+            element.style.borderRight = borderLeft;
+          } else if (element.hasAttribute('data-original-border-left')) {
+            element.style.borderLeft = element.getAttribute('data-original-border-left') || '';
+            element.style.borderRight = element.getAttribute('data-original-border-right') || '';
+            element.removeAttribute('data-original-border-left');
+            element.removeAttribute('data-original-border-right');
+          }
+        }
       }
     }
   };
 
-  // --- Template manager ---
+  // --- Template Manager ---
   const TemplateManager = {
-    collectOverrides() {
-      State.templateOverrides.clear();
-      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(el => {
-        const rumi = el.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR)?.toLowerCase();
-        const formId = el.getAttribute(UI.TEMPLATE_DATA_ATTR);
-        if (rumi && formId) State.templateOverrides.set(rumi, { formId });
-      });
-    },
-    convert(toJawi) {
-      document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).forEach(el => {
-        const rumi = el.getAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR);
-        const formId = el.getAttribute(UI.TEMPLATE_DATA_ATTR);
-        if (!this.validateFormMapping(formId, rumi, State.dictionary)) {
-          el.classList.add(UI.NOCONVERT_CLASS); el.classList.remove(UI.TEMPLATE_CLASS); return;
-        }
-        let txt = toJawi ? State.dictionary.forms[formId] || rumi : rumi;
-        if (toJawi) txt = replaceHamzaWithSpan(txt);
-        if (el.innerHTML !== txt) {
-          safeSetInnerHTML(el, txt);
-          Converter.setRTLDirection(el, toJawi);
-        }
-      });
-      if (toJawi)
-        document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).forEach(el =>
-          safeSetInnerHTML(el, replaceHamzaWithSpan(el.textContent))
-        );
-    },
-    validateFormMapping(formId, rumi, dict) {
-      return !!(formId && rumi && dict?.formMappings?.[formId] && dict.formMappings[formId].toLowerCase() === rumi.toLowerCase());
-    },
     initialize() {
-      document.querySelectorAll("[data-form-id]").forEach(el => {
-        if (el.classList.contains(UI.TEMPLATE_CLASS)) return;
-        const formId = el.getAttribute(UI.TEMPLATE_DATA_ATTR);
-        if (!formId) return;
-        if (!el.hasAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR))
-          el.setAttribute(UI.TEMPLATE_ORIG_TEXT_ATTR, el.textContent);
-        el.classList.add(UI.TEMPLATE_CLASS);
-      });
-      document.querySelectorAll("[data-no-convert]").forEach(el => el.classList.add(UI.NOCONVERT_CLASS));
-      DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.TEMPLATE_CLASS}`).length} form templates`);
-      DEBUG && console.log(`Initialized ${document.querySelectorAll(`.${UI.NOCONVERT_CLASS}`).length} no-convert templates`);
+      for (const el of document.querySelectorAll("[data-form-id]")) {
+        if (el.classList.contains(CONFIG.TEMPLATE_CLASS)) continue;
+        const formId = el.getAttribute(CONFIG.TEMPLATE_DATA_ATTR);
+        if (!formId) continue;
+        if (!el.hasAttribute(CONFIG.TEMPLATE_ORIG_TEXT_ATTR))
+          el.setAttribute(CONFIG.TEMPLATE_ORIG_TEXT_ATTR, el.textContent);
+        el.classList.add(CONFIG.TEMPLATE_CLASS);
+      }
+      
+      for (const el of document.querySelectorAll("[data-no-convert]")) 
+        el.classList.add(CONFIG.NOCONVERT_CLASS);
+    },
+    
+    process(toJawi) {
+      State.templateOverrides.clear();
+      
+      for (const el of document.querySelectorAll(`.${CONFIG.TEMPLATE_CLASS}`)) {
+        const rumi = el.getAttribute(CONFIG.TEMPLATE_ORIG_TEXT_ATTR);
+        const formId = el.getAttribute(CONFIG.TEMPLATE_DATA_ATTR);
+        
+        if (rumi && formId) State.templateOverrides.set(rumi.toLowerCase(), { formId });
+        
+        if (!this.validateFormMapping(formId, rumi, State.dictionary)) {
+          el.classList.add(CONFIG.NOCONVERT_CLASS);
+          el.classList.remove(CONFIG.TEMPLATE_CLASS);
+          continue;
+        }
+        
+        let txt = toJawi ? State.dictionary.forms[formId] || rumi : rumi;
+        if (toJawi) txt = enhanceText(txt);
+        
+        if (el.innerHTML !== txt) {
+          DOM.setContent(el, txt, true);
+          DOM.setDirection(el, toJawi);
+        }
+      }
+      
+      if (toJawi) {
+        for (const el of document.querySelectorAll(`.${CONFIG.NOCONVERT_CLASS}`))
+          DOM.setContent(el, enhanceText(el.textContent), true);
+      }
+    },
+    
+    validateFormMapping(formId, rumi, dict) {
+      return !!(formId && rumi && dict?.formMappings?.[formId] && 
+        dict.formMappings[formId].toLowerCase() === rumi.toLowerCase());
     }
   };
 
-  // --- UI manager ---
+  // --- UI Manager ---
   const UIManager = {
     setupStyles() {
       document.getElementById("rumi-jawi-styles")?.remove();
-      const skin = mw.config.get("skin"), isMobile = skin === "minerva", isMonobook = skin === "monobook";
       const css = `
-        .IPA, .IPA * { direction: ltr !important; unicode-bidi: isolate !important; }
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} {
-          margin: ${isMobile ? "8px 0" : "0"};
-          ${isMobile ? "list-style: none;" : ""}
+        .IPA, .IPA *, .chemf, .chemf *, .barelink, .barelink *, .number, .number * { 
+          direction: ltr !important; unicode-bidi: isolate !important; 
         }
-        ${isMobile ? `.menu .${UI.NAMESPACE_CLASS}::before { display: none !important; }` : ""}
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-label--title {
-          font-weight: bold; font-size: inherit; padding: ${isMobile ? "8px 16px 4px" : "0"};
-          color: ${isMobile ? "var(--color-base, #54595d);" : ""};
-        }
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio--inline {
-          display: flex; flex-direction: column; align-items: flex-start;
-        }
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__content {
-          padding: ${isMobile ? "8px 16px" : "4px 0"};
-        }
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__label {
-          display: flex; align-items: center; cursor: pointer; gap: ${isMobile ? "12px" : "4px"};
-          width: 100%; ${isMonobook ? "position: relative;" : ""}
-        }
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input {
-          ${isMobile ? `position: absolute; opacity: 0;` : "margin: 0;"}
-          ${isMonobook ? "position: static; " : ""}
-        }
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__icon {
-          width: ${isMobile ? "20px" : "14px"}; height: ${isMobile ? "20px" : "14px"};
-          ${isMobile ? `border: 2px solid var(--color-notice, #72777d); border-radius: 50%; position: relative; flex-shrink: 0;` : ""}
-        }
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon {
-          border-color: var(--color-progressive, #36c);
-        }
-        ${isMobile ? `
-          #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked + .cdx-radio__icon:after {
-            content: ''; position: absolute; width: 10px; height: 10px;
-            background: var(--color-progressive, #36c); border-radius: 50%;
-            top: 50%; left: 50%; transform: translate(-50%, -50%);
-          }
-        ` : ""}
-        #n-malayscriptconverter.${UI.NAMESPACE_CLASS} .cdx-radio__input:checked ~ .cdx-radio__label-content {
-          color: var(--color-progressive, #36c);
-        }
+        .hamza-span { vertical-align: 28%; line-height: 1.0; }
+        [dir="rtl"] table.clade td.clade-label { border-left: none !important; border-right: 1px solid !important; }
+        [dir="rtl"] table.clade td.clade-label.first { border-left: none !important; border-right: none !important; }
+        [dir="rtl"] table.clade td.clade-label.reverse { border-left: 1px solid !important; border-right: none !important; }
+        [dir="rtl"] table.clade td.clade-slabel { border-left: none !important; border-right: 1px solid !important; }
+        [dir="rtl"] table.clade td.clade-slabel.last { border-left: none !important; border-right: none !important; }
+        [dir="rtl"] table.clade td.clade-slabel.reverse { border-left: 1px solid !important; border-right: none !important; }
+        [dir="rtl"] table.clade td.clade-bar { text-align: right !important; }
+        [dir="rtl"] table.clade td.clade-bar.reverse { text-align: left !important; }
+        [dir="rtl"] table.clade td.clade-leaf { text-align: right !important; }
+        [dir="rtl"] table.clade td.clade-leafR { text-align: left !important; }
+        [dir="rtl"] table.clade td.clade-leaf.reverse { text-align: left !important; }
+        .converter-container { list-style: none !important; margin-left: 1rem !important;}
+        .converter-container > div { list-style: none !important;}
+        .converter-container > div:last-child { border-bottom: none !important;}
+        #n-languageconverter .cdx-field:nth-child(2) { margin-top: 0 !important; }
+        .skin-vector:not(.skin-vector-2022) #n-languageconverter .cdx-label__label__text { font-size: 0.75em !important; line-height: 1.125em !important; }
+        .skin-monobook #n-languageconverter .cdx-label__label__text { font-size: 95% !important; }
+        .skin-timeless #n-languageconverter .cdx-label__label__text { font-size: 0.95em !important; }
+        .skin-timeless #n-languageconverter .cdx-label__label { margin: 0 0 0 0 !important; }
       `;
       const style = document.createElement("style");
-      style.id = "rumi-jawi-styles"; style.textContent = css;
+      style.id = "rumi-jawi-styles";
+      style.textContent = css;
       document.head.appendChild(style);
     },
-    createControlsHTML(name, title, options) {
-      let html = `<div class="cdx-field"><label class="cdx-label cdx-label--title">
-        <span class="cdx-label__text convertible-text" data-rumi="${title}">${title}</span>
-        </label><div class="cdx-radio--inline" role="radiogroup" aria-label="${title}">`;
-      options.forEach(opt => {
-        html += `<div class="cdx-radio__content"><label class="cdx-radio__label">
-          <input type="radio" class="cdx-radio__input" name="${name}" value="${opt.value}" 
-            ${opt.checked ? "checked" : ""} aria-checked="${opt.checked}">
-          <span class="cdx-radio__icon"></span>
-          <span class="cdx-radio__label-content convertible-text" data-rumi="${opt.label}">${opt.label}</span>
-          </label></div>`;
-      });
-      return html + "</div></div>";
-    },
-    setupControls() {
-      const skin = mw.config.get("skin");
-      if (!UI.SUPPORTED_SKINS.includes(skin)) { DEBUG && console.log(`Unsupported skin: ${skin}`); return; }
-      const isMobile = skin === "minerva";
-      const container = isMobile ?
-        document.querySelector(".menu") :
-        document.querySelector("#vector-pinned-container ul, #p-navigation ul");
-      if (!container) { console.error(`Navigation container not found for ${skin} skin`); return; }
-      document.querySelectorAll("#n-malayscriptconverter, #n-ui-language").forEach(el => el.remove());
 
-      const scriptLi = document.createElement("li");
-      scriptLi.id = "n-malayscriptconverter";
-      scriptLi.className = UI.NAMESPACE_CLASS;
-      const persistentScript = typeof Storage !== 'undefined' ? localStorage.getItem("persistentScript") : null;
-      const persistentLang = typeof Storage !== 'undefined' ? localStorage.getItem("persistentLang") : null;
-      const currentLanguage = persistentLang || mw.config.get("wgUserLanguage");
-      const options = [
-        { value: "rumi-ui", label: "Rumi", checked: persistentScript ? persistentScript === "rumi" : (currentLanguage !== "ms-arab") },
-        { value: "jawi-ui", label: "Jawi", checked: persistentScript ? persistentScript === "jawi" : (currentLanguage === "ms-arab") }
-      ];
-      safeSetInnerHTML(scriptLi, this.createControlsHTML("rumi-jawi-ui", "Pilihan paparan", options));
-      if (isMobile) {
-        let menuContainer = container.querySelector(".converter-container");
-        if (!menuContainer) {
-          menuContainer = document.createElement("div");
+    async setupControls() {
+      const skin = mw.config.get("skin");
+      if (!CONFIG.SUPPORTED_SKINS.includes(skin) || document.querySelector("#n-languageconverter")) return;
+      
+      const isMobile = skin === "minerva";
+      const container = isMobile ? 
+        document.querySelector(".menu") : 
+        document.querySelector("#vector-pinned-container ul, #p-navigation ul");
+      
+      if (!container) return;
+      
+      // Cleanup existing
+      document.querySelectorAll("#n-languageconverter, .converter-container").forEach(el => {
+        if (el.__vue_app__) {
+          try { el.__vue_app__.unmount(); } catch (e) { console.warn("Failed to unmount Vue app:", e); }
+        }
+        el.remove();
+      });
+      
+      await mw.loader.using('@wikimedia/codex').then((require) => {
+        const Vue = require('vue');
+        const { CdxField, CdxRadio } = require('@wikimedia/codex');
+        
+        let converterContainer;
+        if (isMobile) {
+          const menuContainer = document.createElement("div");
           menuContainer.className = "converter-container";
           container.appendChild(menuContainer);
+          converterContainer = document.createElement("div");
+          converterContainer.id = "n-languageconverter";
+          menuContainer.appendChild(converterContainer);
+        } else {
+          converterContainer = document.createElement("li");
+          converterContainer.id = "n-languageconverter";
+          converterContainer.className = CONFIG.NAMESPACE_CLASS;
+          container.appendChild(converterContainer);
         }
-        menuContainer.appendChild(scriptLi);
-      } else { 
-        container.appendChild(scriptLi);
-      }
-      this.setupEventHandlers();
-    },
-    setupEventHandlers() {
-      document.querySelectorAll(".cdx-radio__input[name=\"rumi-jawi-ui\"]").forEach(radio => {
-        radio.addEventListener("change", async function() {
-          const isJawi = this.value === "jawi-ui";
-          const language = isJawi ? "ms-arab" : "ms";
-          if (typeof Storage !== 'undefined') {
-            localStorage.setItem("persistentScript", isJawi ? "jawi" : "rumi");
-            localStorage.setItem("persistentLang", language);
-          }
-          await UIManager.setUserLanguage(language);
-          window.location.reload();
+        
+        const persistentScript = Storage.get("persistentScript");
+        const persistentLang = Storage.get("persistentLang");
+        const currentLanguage = persistentLang || mw.config.get("wgUserLanguage");
+        
+        // Only two options: Rumi and Jawi
+        const displayOptions = [
+          { value: "rumi", label: "Rumi" },
+          { value: "jawi", label: "Jawi" }
+        ];
+        // Determine selected value
+        let selectedDisplay = "rumi";
+        if (persistentScript) {
+          selectedDisplay = persistentScript === "jawi" ? "jawi" : "rumi";
+        } else if ((persistentLang || mw.config.get("wgUserLanguage")) === "ms-arab") {
+          selectedDisplay = "jawi";
+        }
+
+        const converterApp = Vue.createMwApp({
+          components: { CdxField, CdxRadio },
+          data() {
+            return {
+              selectedDisplay,
+              displayOptions
+            };
+          },
+          methods: {
+            async handleDisplayChange() {
+              const isJawi = this.selectedDisplay === "jawi";
+              Storage.set("persistentScript", isJawi ? "jawi" : "rumi");
+              Storage.set("persistentLang", isJawi ? "ms-arab" : "ms");
+              // Always fetch dictionary before language change
+              await DictionaryManager.fetch();
+              try { 
+                await new mw.Api().saveOption("language", isJawi ? "ms-arab" : "ms"); 
+              }
+              catch (error) { console.error("Failed to save language preference:", error); }
+              // If language is not yet set, reload to apply language, then convert after reload
+              if ((mw.config.get("wgUserLanguage") === "ms-arab") !== isJawi) {
+                window.location.reload();
+                return;
+              }
+              // After reload, or if already in correct language, convert
+              await Converter.convert(isJawi);
+              State.setScript(isJawi ? "jawi" : "rumi");
+            }
+          },
+          template: `
+            <div>
+              <cdx-field :is-fieldset="true">
+                <template #label>
+                  <span class="convertible-text" data-rumi="Pilihan paparan">Pilihan paparan</span>
+                </template>
+                <cdx-radio v-for="option in displayOptions" :key="option.value"
+                  v-model="selectedDisplay" name="display-group" :input-value="option.value"
+                  class="cdx-radio--inline" @change="handleDisplayChange">
+                  <span class="convertible-text" :data-rumi="option.label">{{ option.label }}</span>
+                </cdx-radio>
+              </cdx-field>
+            </div>
+          `
         });
+        
+        try { converterContainer.__vue_app__ = converterApp.mount(converterContainer); }
+        catch (error) { console.error("Failed to mount converter app:", error); }
       });
     },
-    async setUserLanguage(language) {
-      try { await new mw.Api().saveOption("language", language); }
-      catch (error) { console.error("Failed to save language preference:", error); }
-    },
-    initialize() { this.setupStyles(); this.setupControls(); }
+
+    initialize() {
+      this.setupStyles();
+      this.setupControls();
+    }
   };
 
-  // --- Page context and initialization ---
+  // --- Initialization ---
   function checkPageContext() {
     try {
       return typeof mw.config.get("wgNamespaceNumber") !== "undefined" &&
         !["edit", "submit"].includes(mw.config.get("wgAction")) &&
         !document.querySelector(".ve-active, .wikiEditor-ui") &&
         !mw.config.get("wgVisualEditor")?.isActive;
-    } catch (error) { console.error("Error checking page context:", error); return false; }
+    } catch { return false; }
   }
+
   function getRequiredElements() {
-    const content = document.querySelector("#mw-content-text .mw-parser-output"), title = document.querySelector(".mw-first-heading");
+    const content = document.querySelector("#mw-content-text .mw-parser-output");
+    const title = document.querySelector(".mw-first-heading");
     if (!content || !title) throw new Error("Required content elements not found");
     return { content, title };
   }
+
   async function initializeApp() {
     if (State.initialized || !checkPageContext()) return;
+    
     try {
       const { content, title } = getRequiredElements();
       State.init(content, title);
+      
       UIManager.initialize();
       TemplateManager.initialize();
+      wrapSpecialElements();
+      
       State.dictionary = await DictionaryManager.fetch();
-      const persistentScript = typeof Storage !== 'undefined' ? localStorage.getItem("persistentScript") : null;
-      const persistentLang = typeof Storage !== 'undefined' ? localStorage.getItem("persistentLang") : null;
-      let isJawi = persistentScript ? persistentScript === "jawi" : (persistentLang || mw.config.get("wgUserLanguage")) === "ms-arab";
+      
+      const persistentScript = Storage.get("persistentScript");
+      const persistentLang = Storage.get("persistentLang");
+      const isJawi = persistentScript ? persistentScript === "jawi" : 
+        (persistentLang || mw.config.get("wgUserLanguage")) === "ms-arab";
+      
       State.setScript(isJawi ? "jawi" : "rumi");
-      setRadioChecked(isJawi ? "jawi-ui" : "rumi-ui");
+      
+      // Set radio buttons
+      const setRadioChecked = v => document.querySelectorAll(`.cdx-radio__input[value="${v}"]`)
+        .forEach(r => r.checked = true);
+      setRadioChecked(isJawi ? "jawi-script" : "rumi-script");
+      setRadioChecked((persistentLang || mw.config.get("wgUserLanguage")) === "ms-arab" ? "ms-arab" : "ms");
+      
       if (isJawi) await Converter.convert(true);
       State.initialized = true;
+      
       DEBUG && console.log("Initialized successfully");
-    } catch (error) { console.error("Initialization failed:", error); }
+    } catch (error) { 
+      console.error("Initialization failed:", error); 
+    }
   }
-  if (typeof mw !== 'undefined' && mw.hook) mw.hook("wikipage.content").add(initializeApp);
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", initializeApp);
-  else requestAnimationFrame(initializeApp);
+
+  // Debounced initialization
+  let initTimeout;
+  const debouncedInit = () => {
+    clearTimeout(initTimeout);
+    initTimeout = setTimeout(initializeApp, 100);
+  };
+
+  if (typeof mw !== 'undefined' && mw.hook) mw.hook("wikipage.content").add(debouncedInit);
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", debouncedInit);
+  else requestAnimationFrame(debouncedInit);
 })();
