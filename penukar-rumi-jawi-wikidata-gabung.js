@@ -387,7 +387,7 @@
       
       const numbers = [];
       let result = text.replace(
-        /(?:^|(?<=\s))([+\-*/^]?)(?:\d{1,2}:\d{2}(?::\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?%?|\d+(?:[.,]\d+)?%?)([+\-*/^]?)(?=\s|$|[^\d.,])/g,
+        /(?:^|(?<=\s))([+\-*/^]?)([A-Z]{2,3}[$£¢€¥]|[$£¢€¥])?(?:\d{1,2}:\d{2}(?::\d{2})?|\d{1,3}(?:[.,]\d{3})*(?:[.,]\d+)?%?|\d+(?:[.,]\d+)?%?|°?\d+(?:[.,]\d+)?°?(?:[CF]|(?:\d{1,2}'(?:\d{1,2}'')?)))([+\-*/^]?)([$£¢€¥][A-Z]{2,3}|°[CF]?)?(?=\s|$|[^\d.,°'"])/g,
         m => `__NUM${numbers.push(`<span class="number">${m.trim()}</span>`) - 1}__`
       );
       
@@ -402,17 +402,17 @@
       result = replaceByDict(result, dict.words, w => w.includes("'"));
       
       // Handle hyphenated words
-      result = result.replace(/\b\w+(?:-\w+)+\b/g, m => {
+      result = result.replace(/\b\w+(?:[\-–—]\w+)+\b/g, m => {
         const fid = dict.words[m.toLowerCase()];
         if (fid) return dict.forms[fid];
-        return m.split("-").map(part => {
+        return m.split(/[\-–—]/).map(part => {
           const pfid = dict.words[part.toLowerCase()];
           return pfid ? dict.forms[pfid] : part;
-        }).join("-");
+        }).join(m.includes('–') ? '–' : m.includes('—') ? '—' : '-');
       });
       
       // Handle single words
-      const singleWordRegex = /(?:^|[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\])([\w\u00C0-\uFFFF]+)(?=[\s\.,;:!?\(\)\[\]{}'"'""\-–—\/\\]|$)/g;
+      const singleWordRegex = /(?:^|[\s\.,;:!?\(\)\[\]{}'"'""\/\\])([\w\u00C0-\uFFFF]+)(?=[\s\.,;:!?\(\)\[\]{}'"'""\/\\]|$)/g;
       result = result.replace(singleWordRegex, (match, word) => {
         const fid = dict.words[word.toLowerCase()];
         const converted = fid ? dict.forms[fid] : word;
