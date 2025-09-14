@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 27th July 2025
+ ** Updated on 14th September 2025
  **
  **/
 
@@ -61,9 +61,9 @@
     hasSkipClass: (el) => CONFIG.SKIP_CLASSES.some(cls => el.classList?.contains(cls)),
     isSkippableElement: (el) => {
       if (!el) return true;
-      return el.tagName === 'SPAN' && (DOM.hasSkipClass(el) || 
-        el.classList.contains(CONFIG.NOCONVERT_CLASS) || 
-        el.classList.contains(CONFIG.TEMPLATE_CLASS));
+      if (el.classList?.contains(CONFIG.NOCONVERT_CLASS) || el.classList?.contains(CONFIG.TEMPLATE_CLASS)) return true;
+      if (el.tagName === 'SPAN' && DOM.hasSkipClass(el)) return true;
+      return false;
     },
     createWalker: (root, acceptNode) => document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode }),
     collectNodes: (walker) => {
@@ -77,131 +77,6 @@
     get: (key) => typeof window.Storage !== 'undefined' ? localStorage.getItem(key) : null,
     set: (key, value) => typeof window.Storage !== 'undefined' && localStorage.setItem(key, value)
   };
-
-  // --- Text Processing ---
-  function enhanceText(text) {
-    if (!text) return text;
-    
-    // Handle hamza with exceptions
-    const exceptions = { skip: ["القرءان"], force: ["چيء", "داتوء", "توء", "نيء"] };
-    let tempMap = {};
-    
-    exceptions.skip.forEach((ex, i) => {
-      const key = `__EXC${i}__`;
-      tempMap[key] = ex;
-      text = text.replaceAll(ex, key);
-    });
-    
-    const hamzaSpan = '<span class="hamza-span">ء</span>';
-    exceptions.force.forEach(word => text = text.replaceAll(word, word.replace(/ء/g, hamzaSpan)));
-    
-    text = text.replace(/([\s"'"'{\(\[<])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan);
-    text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan);
-    
-    Object.entries(tempMap).forEach(([k, ex]) => text = text.replaceAll(k, ex));
-    
-    // Handle IPA segments
-    text = text.replace(/(["'])?([\/\[])(<span[^>]*>[\s\S]+?<\/span>)([\/\]])\1?/g,
-      (m, quote, open, inner, close) =>
-        quote ? `${quote}\u2066${open}${inner}${close}\u2069${quote}` : `\u2066${open}${inner}${close}\u2069`
-    );
-    text = text.replace(/([\/\[])([^\]\/<>]+)([\/\]])/g, (m, open, inner, close) =>
-      ((open === '/' && close === '/') || (open === '[' && close === ']')) && /[\u0250-\u02AF.ˈˌ|‖]/.test(inner)
-        ? `\u2066${open}${inner}${close}\u2069` : m
-    );
-    
-    return text;
-  }
-
-  function isChemicalElement(textNode, subSupNode) {
-    if (!textNode || !subSupNode || textNode.nodeType !== Node.TEXT_NODE) return false;
-    if (!["SUB", "SUP"].includes(subSupNode.nodeName)) return false;
-    const txt = textNode.textContent.trim(), subSupText = subSupNode.textContent.trim();
-    const hasId = subSupNode.getAttribute?.("id");
-    // More comprehensive chemical patterns including compounds, Greek prefixes, and parenthetical groups
-    const chemPatterns = [
-      /^[A-Z][a-z]?$/, // Simple elements: Al, O, H
-      /^[α-ω]-[A-Z][a-z]*$/, // Greek prefixes: α-Al, β-Fe
-      /^[A-Z][a-z]?[0-9]*$/, // Elements with numbers: Al2, O3
-      /^\([A-Z][a-z]?[0-9]*\)$/, // Parenthetical elements: (H), (Al)
-      /^[A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*$/, // Simple compounds: Al2O3, H2S
-      /^\([A-Z][a-z]?[0-9]*\)[0-9]*$/, // Parenthetical with numbers: (NH4)2
-      /^\([A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*\)$/, // Parenthetical compounds: (H2S)
-      /^[α-ω]-[A-Z][a-z]*[0-9]*[A-Z][a-z]*[0-9]*$/ // Greek prefix compounds: α-Al2O3
-    ];
-    return chemPatterns.some(pattern => pattern.test(txt)) && hasId && /^(\d+)([+-])?$/.test(subSupText);
-  }
-
-  function wrapSpecialElements() {
-    // Wrap chemical formulas
-    const chemWalker = DOM.createWalker(document.body, node => {
-      const parent = node.parentElement;
-      if (!parent || parent.classList.contains('chemf')) return NodeFilter.FILTER_REJECT;
-      return node.nextSibling && isChemicalElement(node, node.nextSibling) ? 
-        NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-    });
-    
-    const processedNodes = new Set();
-    const textNodes = DOM.collectNodes(chemWalker);
-    
-    for (const textNode of textNodes) {
-      if (processedNodes.has(textNode)) continue;
-      
-      const consecutiveElements = [];
-      let currentNode = textNode;
-      
-      // More comprehensive chemical element validation including compounds and Greek prefixes
-      const textContent = currentNode.textContent.trim();
-      const isValidChemElement = /^(?:[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*|\([A-Z][a-z]?[0-9]*\)[0-9]*|\([A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*\)|[A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*[A-Z][a-z]*[0-9]*)$/.test(textContent);
-      if (!isValidChemElement) continue;
-      
-      while (currentNode?.nextSibling && isChemicalElement(currentNode, currentNode.nextSibling)) {
-        consecutiveElements.push({ text: currentNode, subSup: currentNode.nextSibling });
-        currentNode = currentNode.nextSibling.nextSibling;
-        
-        // Skip whitespace nodes
-        while (currentNode?.nodeType === Node.TEXT_NODE && !currentNode.textContent.trim()) {
-          currentNode = currentNode.nextSibling;
-        }
-        
-        // Stop if we encounter a text node that's not a chemical element
-        if (currentNode?.nodeType === Node.TEXT_NODE) {
-          const nextText = currentNode.textContent.trim();
-          // More comprehensive validation for next chemical element
-          const isNextValidChem = /^(?:[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*|\([A-Z][a-z]?[0-9]*\)[0-9]*|\([A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*\)|[A-Z][a-z]?[0-9]*[A-Z][a-z]?[0-9]*|[α-ω]-[A-Z][a-z]*[0-9]*[A-Z][a-z]*[0-9]*)$/.test(nextText);
-          if (!isNextValidChem) {
-            break;
-          }
-        }
-      }
-      
-      if (consecutiveElements.length) {
-        const wrapper = document.createElement('span');
-        wrapper.className = 'chemf';
-        consecutiveElements[0].text.parentNode.insertBefore(wrapper, consecutiveElements[0].text);
-        
-        for (const element of consecutiveElements) {
-          wrapper.appendChild(element.text);
-          wrapper.appendChild(element.subSup);
-          processedNodes.add(element.text);
-        }
-      }
-    }
-    
-    // Wrap bare links
-    const linkWalker = DOM.createWalker(document.body, node => {
-      const parent = node.parentElement;
-      return (!parent || parent.classList.contains('barelink')) ? NodeFilter.FILTER_REJECT :
-        /^https?:\/\/\S+$/.test(node.textContent.trim()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
-    });
-    
-    for (const node of DOM.collectNodes(linkWalker)) {
-      const wrapper = document.createElement('span');
-      wrapper.className = 'barelink';
-      wrapper.textContent = node.textContent.trim();
-      node.parentNode.replaceChild(wrapper, node);
-    }
-  }
 
   // --- State & Data Management ---
   const State = {
@@ -228,8 +103,14 @@
     loadFromCache() {
       const cached = Storage.get(CACHE_KEY);
       if (cached) {
-        const { timestamp, data } = JSON.parse(cached);
-        if (Date.now() - timestamp < CACHE_DURATION) return data;
+        try {
+          const parsed = JSON.parse(cached);
+          const { timestamp, data } = parsed || {};
+          if (timestamp && Date.now() - timestamp < CACHE_DURATION) return data;
+        } catch (e) {
+          DEBUG && console.warn("Failed to parse cache, clearing:", e);
+          try { localStorage.removeItem(CACHE_KEY); } catch (e2) {}
+        }
       }
       return null;
     },
@@ -237,26 +118,28 @@
     async fetchFromAPI() {
       try {
         const controller = new AbortController();
-        setTimeout(() => controller.abort(), 30000);
+        const to = setTimeout(() => controller.abort(), 30000);
         
         const response = await fetch(
           `${SPARQL_URL}?query=${encodeURIComponent(SPARQL_QUERY)}&format=json`,
           { headers: { Accept: "application/sparql-results+json" }, signal: controller.signal }
         );
         
+        clearTimeout(to);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const result = await response.json();
         const processedData = this.process(result);
         
         Storage.set(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data: processedData }));
         return processedData;
-      } catch {
+      } catch (err) {
+        DEBUG && console.error("Dictionary fetch failed:", err);
         return { words: {}, phrases: {}, forms: {}, formMappings: {} };
       }
     },
     
     process(data) {
-      const dict = { words: {}, phrases: {}, forms: {}, formMappings: {} };
+      const dict = { words: {}, phrases: {}, forms: {}, formMappings: {}, _regex: {} };
       for (const { formId, latn, arab } of data?.results?.bindings ?? []) {
         if (!formId || !latn || !arab) continue;
         const rumi = latn.value.toLowerCase(), jawi = arab.value, fid = formId.value;
@@ -264,6 +147,18 @@
         dict.formMappings[fid] = rumi;
         (rumi.includes(" ") ? dict.phrases : dict.words)[rumi] = fid;
       }
+      
+      // Build bounded regex for phrases and words (longest-first)
+      const buildRegex = (obj) => {
+        const keys = Object.keys(obj).sort((a,b)=>b.length-a.length).map(k=>k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        if (!keys.length) return null;
+        // Use non-capturing group with word boundary anchors so we don't match inside other words.
+        // For multi-word phrases, boundaries still work as keys contain spaces.
+        return new RegExp(`(?:^|\\b)(${keys.join("|")})(?=\\b|$)`, "gi");
+      };
+      dict._regex.phrases = buildRegex(dict.phrases);
+      dict._regex.words = buildRegex(dict.words);
+      
       return dict;
     }
   };
@@ -308,7 +203,9 @@
       }
       
       this.preprocessKafDal();
-      DOM.setDirection(State.content, true);
+      // Only change direction and language on the container div itself
+      State.content.setAttribute('dir', 'rtl');
+      State.content.setAttribute('lang', 'ms-arab');
       DOM.setDirection(State.title, true);
       
       let convertedTitle = this.convertText(State.title.textContent, State.dictionary);
@@ -339,19 +236,28 @@
             converted = enhanceText(converted);
             
             if (converted !== n.textContent) {
-              // Only replace the text content, don't wrap in span if not necessary
               if (converted.includes('<span')) {
-                const span = document.createElement("span");
-                DOM.setContent(span, converted, true);
-                n.parentNode?.replaceChild(span, n);
+                const tempDiv = document.createElement("div");
+                DOM.setContent(tempDiv, converted, true);
+                // If the converted content is a single span, use it directly.
+                // Otherwise, wrap everything in a new span.
+                if (tempDiv.children.length === 1 && tempDiv.childNodes.length === 1 && tempDiv.firstElementChild.tagName === 'SPAN') {
+                    n.parentNode?.replaceChild(tempDiv.firstElementChild, n);
+                } else {
+                    const span = document.createElement("span");
+                    DOM.setContent(span, converted, true);
+                    n.parentNode?.replaceChild(span, n);
+                }
               } else {
                 n.textContent = converted;
               }
             }
             
+            // Remove per-element direction setting, as it's now handled at container level
+            // Only set direction for specific elements that need it (like IPA, numbers, etc.)
             let p = n.parentElement;
-            while (p && !p.classList.contains("mw-content-text")) {
-              if (p.nodeType === 1 && p.closest("#mw-content-text .mw-parser-output") && !DOM.isSkippableElement(p)) {
+            while (p && p !== State.content) {
+              if (p.nodeType === 1 && p.closest("#mw-content-text .mw-parser-output") && DOM.hasSkipClass(p)) {
                 DOM.setDirection(p, true);
               }
               p = p.parentElement;
@@ -369,7 +275,9 @@
       if (State.originalContent) {
         State.content.innerHTML = State.originalContent;
         DOM.setContent(State.title, State.originalTitle);
-        DOM.setDirection(State.content, false);
+        // Reset direction and language on the container div
+        State.content.setAttribute('dir', 'ltr');
+        State.content.setAttribute('lang', 'ms');
         DOM.setDirection(State.title, false);
         State.originalContent = State.originalTitle = null;
       }
@@ -426,10 +334,10 @@
       result = result.replace(/(^|[\s]+)([کد])\s+(\S+)/g, (match, space, letter, nextWord) =>
         nextWord.startsWith("ا") ? `${space}${letter}أ${nextWord.slice(1)}` : `${space}${letter}${nextWord}`);
       
-      // Handle punctuation with proper spacing - preserve existing whitespace
-      result = result.replace(/([,;?])(\s*)/g, (match, punct, space) => {
+      // Handle punctuation with proper spacing - convert only if followed by whitespace
+      result = result.replace(/([,;?])(?=\s)/g, (match, punct) => {
         const replacement = CONFIG.PUNCTUATION_MAP[punct] || punct;
-        return replacement + space;
+        return replacement;
       });
       
       numbers.forEach((n, i) => result = result.replace(`__NUM${i}__`, n));
@@ -440,11 +348,9 @@
       const walker = DOM.createWalker(State.content, node => {
         const parent = node.parentElement;
         if (!parent || parent.tagName === 'A') return NodeFilter.FILTER_REJECT;
-        // Only match when "ke" or "di" are standalone words at the end, not part of other words like "Ke"
         const hasKeDi = /\b(ke|di)\s+$/i.test(node.textContent);
-        const nextSibling = node.nextSibling;
-        return hasKeDi && nextSibling?.tagName === 'A' && 
-          !/^(ke|di)\b/i.test(nextSibling.textContent.trim()) ? 
+        const nextEl = node.nextElementSibling;
+        return hasKeDi && nextEl?.tagName === 'A' && !/^(ke|di)\b/i.test(nextEl.textContent.trim()) ?
           NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
       });
       
@@ -452,7 +358,7 @@
         const match = node.textContent.match(/^(.*?)\b(ke|di)\s+$/i);
         if (match) {
           const [, prefix, keDi] = match;
-          const nextLink = node.nextSibling;
+          const nextLink = node.nextElementSibling;
           if (nextLink?.tagName === 'A') {
             node.textContent = prefix;
             nextLink.textContent = `${keDi} ${nextLink.textContent.trim()}`;
@@ -536,6 +442,124 @@
         dict.formMappings[formId].toLowerCase() === rumi.toLowerCase());
     }
   };
+  
+  // --- Text Processing ---
+  function enhanceText(text) {
+    if (!text) return text;
+    
+    // Handle hamza with exceptions
+    const exceptions = { skip: ["القرءان"], force: ["چيء", "داتوء", "توء", "نيء"] };
+    let tempMap = {};
+    
+    exceptions.skip.forEach((ex, i) => {
+      const key = `__EXC${i}__`;
+      tempMap[key] = ex;
+      text = text.replaceAll(ex, key);
+    });
+    
+    const hamzaSpan = '<span class="hamza-span">ء</span>';
+    exceptions.force.forEach(word => text = text.replaceAll(word, word.replace(/ء/g, hamzaSpan)));
+    
+    text = text.replace(/([\s"'"'{\(\[<])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan);
+    text = text.replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan);
+    
+    Object.entries(tempMap).forEach(([k, ex]) => text = text.replaceAll(k, ex));
+    
+    // Handle IPA segments
+    text = text.replace(/(["'])?([\/\[])(<span[^>]*>[\s\S]+?<\/span>)([\/\]])\1?/g,
+      (m, quote, open, inner, close) =>
+        quote ? `${quote}\u2066${open}${inner}${close}\u2069${quote}` : `\u2066${open}${inner}${close}\u2069`
+    );
+    text = text.replace(/([\/\[])([^\]\/<>]+)([\/\]])/g, (m, open, inner, close) =>
+      ((open === '/' && close === '/') || (open === '[' && close === ']')) && /[\u0250-\u02AF.ˈˌ|‖]/.test(inner)
+        ? `\u2066${open}${inner}${close}\u2069` : m
+    );
+    
+    return text;
+  }
+
+  function isChemicalElement(textNode, subSupNode) {
+    if (!textNode || textNode.nodeType !== Node.TEXT_NODE) return false;
+    const txt = textNode.textContent.trim();
+    // A single generalized regex for chemical formulas, including complex ions and hydrates.
+    const chemPattern = /^(?:[α-ω]-)?(?:[A-Z][a-z]?\d*|\((?:[A-Z][a-z]?\d*)+\)\d*|\[(?:[A-Z][a-z]?\d*|\((?:[A-Z][a-z]?\d*)+\)\d*)+\]\d*)+(?:[·-](?:[A-Z][a-z]?\d*|\d*[A-Z][a-z]?))*$/;
+    if (!chemPattern.test(txt)) return false;
+
+    if (subSupNode) {
+      if (!["SUB", "SUP"].includes(subSupNode.nodeName)) return false;
+      const subSupText = subSupNode.textContent.trim();
+      const hasId = subSupNode.getAttribute?.("id");
+      return hasId && /^(\d+)([+-])?$/.test(subSupText);
+    }
+    return true; // It's a chemical element part even without sub/sup
+  }
+
+  function wrapSpecialElements() {
+    // Wrap chemical formulas
+    const chemWalker = DOM.createWalker(document.body, node => {
+      const parent = node.parentElement;
+      if (!parent || parent.classList.contains('chemf')) return NodeFilter.FILTER_REJECT;
+      return node.nextSibling && isChemicalElement(node, node.nextSibling) ? 
+        NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    });
+    
+    const processedNodes = new Set();
+    const textNodes = DOM.collectNodes(chemWalker);
+    
+    for (const textNode of textNodes) {
+      if (processedNodes.has(textNode)) continue;
+      
+      const consecutiveElements = [];
+      let currentNode = textNode;
+      
+      // More comprehensive chemical element validation including compounds and Greek prefixes
+      if (!isChemicalElement(currentNode, currentNode.nextSibling)) continue;
+      
+      while (currentNode?.nextSibling && isChemicalElement(currentNode, currentNode.nextSibling)) {
+        consecutiveElements.push({ text: currentNode, subSup: currentNode.nextSibling });
+        currentNode = currentNode.nextSibling.nextSibling;
+        
+        // Skip whitespace nodes
+        while (currentNode?.nodeType === Node.TEXT_NODE && !currentNode.textContent.trim()) {
+          currentNode = currentNode.nextSibling;
+        }
+        
+        // Stop if we encounter a text node that's not a chemical element
+        if (currentNode?.nodeType === Node.TEXT_NODE) {
+          // More comprehensive validation for next chemical element
+          if (!isChemicalElement(currentNode, currentNode.nextSibling)) {
+            break;
+          }
+        }
+      }
+      
+      if (consecutiveElements.length) {
+        const wrapper = document.createElement('span');
+        wrapper.className = 'chemf';
+        consecutiveElements[0].text.parentNode.insertBefore(wrapper, consecutiveElements[0].text);
+        
+        for (const element of consecutiveElements) {
+          wrapper.appendChild(element.text);
+          wrapper.appendChild(element.subSup);
+          processedNodes.add(element.text);
+        }
+      }
+    }
+    
+    // Wrap bare links
+    const linkWalker = DOM.createWalker(document.body, node => {
+      const parent = node.parentElement;
+      return (!parent || parent.classList.contains('barelink')) ? NodeFilter.FILTER_REJECT :
+        /^https?:\/\/\S+$/.test(node.textContent.trim()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    });
+    
+    for (const node of DOM.collectNodes(linkWalker)) {
+      const wrapper = document.createElement('span');
+      wrapper.className = 'barelink';
+      wrapper.textContent = node.textContent.trim();
+      node.parentNode.replaceChild(wrapper, node);
+    }
+  }
 
   // --- UI Manager ---
   const UIManager = {
