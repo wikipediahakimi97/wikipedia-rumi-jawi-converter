@@ -430,7 +430,7 @@
 			const rootResult = this.lookupRootWithFallback(nasalPrefix, rawRoot);
 			if (!rootResult) return null;
 			let { jawi, rumi } = rootResult;
-			if (nasalPrefix) jawi = this.applyNasalAssimilation(nasalPrefix, rumi, jawi);
+			if (nasalPrefix) jawi = this.applyNasalAssimilation(nasalPrefix, rawRoot, jawi);
 			if (outerForHamza) jawi = this.applySpecialPrefixRules(outerForHamza, jawi);
 			return { jawi, rumi };
 		},
