@@ -187,7 +187,7 @@
 					j = i,
 					lastMatch = null,
 					lastPos = i;
-				while (j < chars.length && /[\p{L}\p{M}\s]/u.test(chars[j]) && node.children[normChars[j]]) {
+				while (j < chars.length && /[\p{L}\p{M}\s\-]/u.test(chars[j]) && node.children[normChars[j]]) {
 					node = node.children[normChars[j]];
 					j++;
 					if (node.value) {
