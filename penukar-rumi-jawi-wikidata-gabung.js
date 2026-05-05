@@ -1,6 +1,6 @@
 /**
  ** LOG:
- ** Updated on 21 February 2026
+ ** Updated on 5 May 2026
  **
  **/
 
@@ -23,8 +23,8 @@
 	const CONFIG = {
 		CACHE_KEY: "rumiJawiData",
 		CACHE_DURATION: 3600000,
-		DICT_VERSION: 2,
-		VERSION: "2026-02-21",
+		DICT_VERSION: 3,
+		VERSION: "2026-05-05",
 		DEBUG: false,
 		SPARQL_URL: "https://query.wikidata.org/sparql",
 		SPARQL_QUERY: `SELECT DISTINCT ?formId ?latn ?arab
@@ -134,23 +134,37 @@
 			let node;
 			while ((node = walker.nextNode())) nodes.push(node);
 			return nodes;
-		},
-		setContent: (el, content, isHTML = false) => isHTML ? el.innerHTML = content : el.textContent = content
+		}
 	};
 	// ============================================================================
 	// CACHING & NORMALIZATION
 	// ============================================================================
 	const normCache = new Map();
 	const MAX_NORM_CACHE = 5000;
+	// Normalize NFC, then lowercase only the first letter of each word-like segment.
+	// Boundaries include spaces, punctuation, and hyphens.
+	// Examples:
+	//   "Melayu"          → "melayu"
+	//   "MELAYU"          → "mELAYU"
+	//   "NGO"             → "nGO"
+	//   "ngo"             → "ngo"
+	//   "Johor-Selangor"  → "johor-selangor"
+	//   "JOHOR-Selangor"  → "jOHOR-selangor"
+	//   "Dewan Bahasa"    → "dewan bahasa"
+	//   "DEWAN Bahasa"    → "dEWAN bahasa"
+	const WORD_INITIAL_RE = /(^|[^\p{L}\p{M}'])(\p{L})/gu;
 	const normMs = (str) => {
 		if (!str) return str;
 		if (normCache.has(str)) return normCache.get(str);
-		const result = str.normalize("NFC").toLocaleLowerCase("ms");
+		const nfc = str.normalize("NFC");
+		const result = nfc.replace(WORD_INITIAL_RE, (_, boundary, firstLetter) =>
+			boundary + firstLetter.toLocaleLowerCase("ms")
+		);
 		if (normCache.size > MAX_NORM_CACHE) normCache.clear();
 		normCache.set(str, result);
 		return result;
 	};
-	const tokenizeMalay = (text) => text.match(/[\p{L}\p{M}']+(?:-[\p{L}\p{M}']+)?|[^\p{L}\p{M}']+/gu) || [];
+	const tokenizeMalay = (text) => text.match(/[\p{L}\p{M}']+(?:-[\p{L}\p{M}']+){0,2}|[^\p{L}\p{M}']+/gu) || [];
 	// ============================================================================
 	// TRIE DATA STRUCTURE
 	// ============================================================================
@@ -169,7 +183,7 @@
 			}
 			return node.value;
 		},
-		build: (dict, source, keyFn = k => k.toLowerCase()) => {
+		build: (dict, source, keyFn = normMs) => {
 			const trie = Trie.create();
 			for (const [key, fid] of Object.entries(source)) {
 				Trie.insert(trie, keyFn(key), dict.forms[fid]);
@@ -179,7 +193,7 @@
 		applyPhrase: (text, trie) => {
 			text = text.normalize("NFC");
 			const chars = Array.from(text);
-			const normChars = chars.map(c => normMs(c));
+			const normChars = Array.from(normMs(text));
 			let i = 0,
 				out = "";
 			while (i < chars.length) {
@@ -194,6 +208,11 @@
 						lastMatch = node.value;
 						lastPos = j;
 					}
+				}
+				// ── ADDED: reject match if immediately followed by a letter/mark ──
+				if (lastMatch !== null && lastPos < chars.length && /[\p{L}\p{M}']/u.test(chars[lastPos])) {
+					lastMatch = null;
+					lastPos = i;
 				}
 				out += lastMatch !== null ? lastMatch : chars[i];
 				i = lastMatch ? lastPos : i + 1;
@@ -241,7 +260,10 @@
 			LoadingState.set(true);
 			this._pending = (async () => {
 				try { return await this.fetchFromAPI(); }
-				finally { this._pending = null; if (LoadingState.isLoading) LoadingState.set(false); }
+				finally {
+					LoadingState.set(false);
+					this._pending = null;
+				}
 			})();
 			return this._pending;
 		},
@@ -263,9 +285,13 @@
 				const controller = new AbortController();
 				const timeout = setTimeout(() => controller.abort(), 30000);
 				try {
-					const url = `${CONFIG.SPARQL_URL}?query=${encodeURIComponent(CONFIG.SPARQL_QUERY)}&format=json`;
-					const response = await fetch(url, {
-						headers: { Accept: "application/sparql-results+json" },
+					const response = await fetch(CONFIG.SPARQL_URL, {
+						method: "POST",
+						headers: {
+							"Content-Type": "application/sparql-query",
+							"Accept": "application/sparql-results+json"
+						},
+						body: CONFIG.SPARQL_QUERY,
 						signal: controller.signal
 					});
 					if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -282,7 +308,8 @@
 					clearTimeout(timeout);
 				}
 			} catch (err) {
-				CONFIG.DEBUG && console.error("Dictionary fetch failed:", err);
+				// LoadingState is reset by the outer finally in fetch()
+				console.error("[Rumi-Jawi] Dictionary fetch failed:", err);
 				const empty = { words: {}, phrases: {}, forms: {}, formMappings: {} };
 				State.dictionary = empty;
 				return empty;
@@ -318,7 +345,7 @@
 				tempMap[key] = ex;
 				text = text.replaceAll(ex, key);
 			});
-			const hamzaSpan = '<span class="hamza-span">ء</span>';
+			const hamzaSpan = '<span class="three-quarter-hamza">ء</span>';
 			exceptions.force.forEach(word => text = text.replaceAll(word, word.replace(/ء/g, hamzaSpan)));
 			text = text.replace(/([\s"'"'{\(\[<])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan).replace(/([\u0600-\u06FF])ء(?=[\u0600-\u06FF])/g, (_, p1) => p1 + hamzaSpan);
 			Object.entries(tempMap).forEach(([k, ex]) => text = text.replaceAll(k, ex));
@@ -375,10 +402,13 @@
 				else if (lastRumi === "h") baseJawi = cleanJawi.slice(0, -1) + "ه";
 			}
 			if (suffix === "an") {
-				const lastClean = baseJawi.replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, "").slice(-1);
-				if (lastRumi === "a" && lastClean === "ا") return baseJawi + "ءن";
-				if (lastRumi === "a" && lastClean !== "ا") return baseJawi + "اءن";
-				if (lastRumi === "u" && lastClean === "و") return baseJawi + "ان";
+				const clean = baseJawi.replace(/[\u064B-\u065F\u0670\u06D6-\u06ED]/g, "");
+				if (lastRumi === "a") {
+					if (clean.endsWith("اء")) return baseJawi + "ن";
+					if (clean.endsWith("ا")) return baseJawi + "ءن";
+					return baseJawi + "اءن";
+				}
+				if (lastRumi === "u" && clean.endsWith("و")) return baseJawi + "ان";
 				return baseJawi + "ن";
 			}
 			if (suffix === "i") {
@@ -485,14 +515,30 @@
 			return result;
 		},
 		_tryAll(lower) {
-			// 1. Exact form lookup
+			// 1. Exact form lookup — handles dictionary entries that include an apostrophe,
+			//    e.g. "dato'" → "داتوء"
 			const exact = Trie.lookup(exactFormTrie, lower);
 			if (exact) return exact;
-			// 2. Strip trailing apostrophe
-			const cleaned = lower.replace(/[']+$/, "");
-			if (cleaned !== lower) {
-				const e2 = Trie.lookup(exactFormTrie, cleaned);
-				if (e2) return e2;
+			// 2. If the token has leading/trailing apostrophes, convert the bare word
+			//    and restore the apostrophes around the result.
+			//    e.g. "'perdana" → "'" + "ڤردان" + ""  = "'ڤردان"
+			//         "wazir'"  → ""  + "وازير" + "'" = "وازير'"
+			//    If the bare word cannot be converted either, return null so the
+			//    original token (apostrophes and all) is left unchanged.
+			const leadApos = lower.match(/^[']+/)?.[0] ?? "";
+			const trailApos = lower.match(/[']+$/)?.[0] ?? "";
+			if (leadApos || trailApos) {
+				const bare = lower.slice(leadApos.length, trailApos ? lower.length - trailApos.length : undefined);
+				if (bare) {
+					const e2 = Trie.lookup(exactFormTrie, bare);
+					if (e2) return leadApos + e2 + trailApos;
+					if (bare.includes("-")) {
+						const redup = this._tryReduplication(bare);
+						if (redup) return leadApos + redup + trailApos;
+					}
+					const layered = this._tryLayered(bare);
+					if (layered) return leadApos + layered + trailApos;
+				}
 			}
 			// 3. Hyphenated reduplication
 			if (lower.includes("-")) {
@@ -502,41 +548,65 @@
 			// 4. Full layered morphology parse
 			return this._tryLayered(lower) || null;
 		},
+		// ── Shared prefix iterator ─────────────────────────────────────────────
+		/**
+		 * Generator that yields all valid {outerP, middleP, innerP, rawRoot}
+		 * combinations for a given token, iterating outer→middle→inner prefixes.
+		 */
+		* _iteratePrefixes(token) {
+			for (const outerP of this._candidateMatchingPrefixes(CONFIG.OUTER_PREFIX_PATTERNS, token)) {
+				const afterOuter = outerP ? token.slice(outerP.cut) : token;
+				for (const middleP of this._candidateMatchingPrefixes(CONFIG.MIDDLE_PREFIX_PATTERNS, afterOuter)) {
+					const afterMiddle = middleP ? afterOuter.slice(middleP.cut) : afterOuter;
+					for (const innerP of this._candidateMatchingPrefixes(CONFIG.INNER_PREFIX_PATTERNS, afterMiddle)) {
+						const rawRoot = innerP ? afterMiddle.slice(innerP.cut) : afterMiddle;
+						if (rawRoot) yield { outerP, middleP, innerP, rawRoot };
+					}
+				}
+			}
+		},
 		// ── Reduplication ─────────────────────────────────────────────────────
 		_tryReduplication(lower) {
 			if (this._redupCache.has(lower)) return this._redupCache.get(lower);
 			this._clearCacheIfNeeded(this._redupCache, 2000);
-			const dashIdx = lower.indexOf("-");
-			const left = lower.slice(0, dashIdx);
-			const right = lower.slice(dashIdx + 1);
-			if (!left || !right) { this._redupCache.set(lower, null); return null; }
-			const parsed = this._parseRedupHalves(left, right);
-			const result = parsed ? (parsed.hasAffix ? parsed.jawiLeft + "-" + parsed.jawiRight : parsed.jawiLeft + "٢") : null;
+			const parts = lower.split("-");
+			// ── X-X: try affixed/simple reduplication first (berlari-lari → ٢, etc.) ──
+			if (parts.length === 2) {
+				const [left, right] = parts;
+				if (left && right) {
+					const parsed = this._parseRedupHalves(left, right);
+					if (parsed) {
+						const result = parsed.hasAffix ? parsed.jawiLeft + "-" + parsed.jawiRight : parsed.jawiLeft + "٢";
+						this._redupCache.set(lower, result);
+						return result;
+					}
+				}
+			}
+			// ── General: convert each segment individually and rejoin ──
+			// Handles X-Y (Johor-Selangor), X-Y-Z (Melaka-Selangor-Johor),
+			// X-Y-X (huruf-demi-huruf), and X-X fallback when _parseRedupHalves fails.
+			const convertedParts = parts.map(part => part ? (Trie.lookup(exactFormTrie, part) || LayeredMorphology._tryAll(part) || part) : part);
+			// Only return a result if at least one segment was actually converted,
+			// otherwise leave the whole token unconverted (e.g. unknown proper nouns).
+			const anyConverted = convertedParts.some((p, i) => p !== parts[i]);
+			const result = anyConverted ? convertedParts.join("-") : null;
 			this._redupCache.set(lower, result);
 			return result;
 		},
 		_parseRedupHalves(left, right) {
 			const suffixCandidates = this._candidateSuffixes(right);
-			for (const outerP of this._candidateOuterPrefixes(left)) {
-				const afterOuter = outerP ? left.slice(outerP.cut) : left;
-				for (const middleP of this._candidateMatchingPrefixes(CONFIG.MIDDLE_PREFIX_PATTERNS, afterOuter)) {
-					const afterMiddle = middleP ? afterOuter.slice(middleP.cut) : afterOuter;
-					for (const innerP of this._candidateMatchingPrefixes(CONFIG.INNER_PREFIX_PATTERNS, afterMiddle)) {
-						const rootLeft = innerP ? afterMiddle.slice(innerP.cut) : afterMiddle;
-						if (!rootLeft) continue;
-						for (const suffixInfo of suffixCandidates) {
-							if (rootLeft !== suffixInfo.bareRoot) continue;
-							const resolved = MorphologyHelpers.resolveRoot(outerP, middleP, innerP, rootLeft);
-							if (!resolved) continue;
-							const { jawi: jawiRoot, rumi: resolvedRumi } = resolved;
-							const hasAffix = !!(outerP || middleP || innerP || suffixInfo.innerSuf || suffixInfo.middleSuf || suffixInfo.outerSuf);
-							// Left half: prefixes only (no suffixes)
-							const jawiLeft = MorphologyHelpers.buildJawiFromParts(jawiRoot, resolvedRumi, outerP, middleP, innerP, { innerSuf: null, middleSuf: null, outerSuf: null });
-							// Right half: root + suffixes (no prefixes)
-							const jawiRight = MorphologyHelpers.buildJawiFromParts(jawiRoot, resolvedRumi, null, null, null, suffixInfo);
-							return { jawiLeft, jawiRight, hasAffix };
-						}
-					}
+			for (const { outerP, middleP, innerP, rawRoot } of this._iteratePrefixes(left)) {
+				for (const suffixInfo of suffixCandidates) {
+					if (rawRoot !== suffixInfo.bareRoot) continue;
+					const resolved = MorphologyHelpers.resolveRoot(outerP, middleP, innerP, rawRoot);
+					if (!resolved) continue;
+					const { jawi: jawiRoot, rumi: resolvedRumi } = resolved;
+					const hasAffix = !!(outerP || middleP || innerP || suffixInfo.innerSuf || suffixInfo.middleSuf || suffixInfo.outerSuf);
+					// Left half: prefixes only (no suffixes)
+					const jawiLeft = MorphologyHelpers.buildJawiFromParts(jawiRoot, resolvedRumi, outerP, middleP, innerP, { innerSuf: null, middleSuf: null, outerSuf: null });
+					// Right half: root + suffixes (no prefixes)
+					const jawiRight = MorphologyHelpers.buildJawiFromParts(jawiRoot, resolvedRumi, null, null, null, suffixInfo);
+					return { jawiLeft, jawiRight, hasAffix };
 				}
 			}
 			return null;
@@ -568,18 +638,10 @@
 			return t;
 		},
 		_tryPrefixCombinations(tokenNoSuffix, suffixInfo) {
-			for (const outerP of this._candidateOuterPrefixes(tokenNoSuffix)) {
-				const afterOuter = outerP ? tokenNoSuffix.slice(outerP.cut) : tokenNoSuffix;
-				for (const middleP of this._candidateMatchingPrefixes(CONFIG.MIDDLE_PREFIX_PATTERNS, afterOuter)) {
-					const afterMiddle = middleP ? afterOuter.slice(middleP.cut) : afterOuter;
-					for (const innerP of this._candidateMatchingPrefixes(CONFIG.INNER_PREFIX_PATTERNS, afterMiddle)) {
-						const rawRoot = innerP ? afterMiddle.slice(innerP.cut) : afterMiddle;
-						if (!rawRoot) continue;
-						const resolved = MorphologyHelpers.resolveRoot(outerP, middleP, innerP, rawRoot);
-						if (!resolved) continue;
-						return MorphologyHelpers.buildJawiFromParts(resolved.jawi, resolved.rumi, outerP, middleP, innerP, suffixInfo);
-					}
-				}
+			for (const { outerP, middleP, innerP, rawRoot } of this._iteratePrefixes(tokenNoSuffix)) {
+				const resolved = MorphologyHelpers.resolveRoot(outerP, middleP, innerP, rawRoot);
+				if (!resolved) continue;
+				return MorphologyHelpers.buildJawiFromParts(resolved.jawi, resolved.rumi, outerP, middleP, innerP, suffixInfo);
 			}
 			return null;
 		},
@@ -591,10 +653,6 @@
 				if (token.startsWith(p.rumi)) results.push(p);
 			}
 			return results;
-		},
-		/** Returns [null, ...matching outer prefix patterns] for token. */
-		_candidateOuterPrefixes(token) {
-			return this._candidateMatchingPrefixes(CONFIG.OUTER_PREFIX_PATTERNS, token);
 		},
 		/**
 		 * Returns all possible suffix decompositions for a token.
@@ -769,7 +827,7 @@
 			LayeredMorphology._cache.clear();
 			LayeredMorphology._redupCache.clear();
 			exactFormTrie = Trie.build(dict, dict.words);
-			phraseTrie = Trie.build(dict, dict.phrases, k => k.toLowerCase().replace(/\s+/g, " "));
+			phraseTrie = Trie.build(dict, dict.phrases, k => normMs(k).replace(/\s+/g, " "));
 			rootTrie = Trie.create();
 			for (const [fid, rumi] of Object.entries(dict.formMappings)) {
 				Trie.insert(rootTrie, normMs(rumi), dict.forms[fid]);
@@ -870,14 +928,36 @@
 			if (!text?.trim() || !dict) return text;
 			const { text: shielded, tokens: numberTokens } = SpecialContent.shieldNumbers(text);
 			let result = shielded.replace(/\s+/g, " ");
-			result = result.replace(/\b(ke|di)\s+([\p{L}\p{M}]+)/giu, (_, p, w) => p.toLowerCase() + w);
 			result = phraseTrie ? Trie.applyPhrase(result, phraseTrie) : result;
+			result = result.replace(/\b(di|ke|se)(\s+)([\p{L}\p{M}]+)/giu,
+				(_, prefix, space, word) => {
+					const p = normMs(prefix);
+					// Reject forms like "DI", "KE", "SE", because second-letter case differs.
+					if (p !== "di" && p !== "ke" && p !== "se") {
+						return prefix + space + word;
+					}
+					const converted = LayeredMorphology.convert(p + word);
+					const prefixMap = { di: "د", ke: "ک", se: "س" };
+					if (converted) return converted;
+					return prefixMap[p] + word;
+				});
 			const wordTokens = tokenizeMalay(result);
 			result = wordTokens.map(token => {
 				const raw = normMs(token).trim();
 				if (!/[\p{L}\p{M}]/u.test(raw)) return token;
 				const converted = LayeredMorphology.convert(raw);
-				return converted !== null ? converted : token;
+				if (converted === null) return token;
+				// For hyphenated tokens, restore original casing of any unconverted Rumi segments.
+				// convert() operates on a lowercased `raw`, so segments that failed to convert
+				// (still Latin) come back lowercase — restore them from the original `token`.
+				if (token.includes("-") && converted.includes("-")) {
+					const origParts = token.split("-");
+					const convParts = converted.split("-");
+					if (origParts.length === convParts.length) {
+						return convParts.map((cp, i) => /[\p{L}]/u.test(cp) && !/[\u0600-\u06FF]/u.test(cp) ? origParts[i] : cp).join("-");
+					}
+				}
+				return converted;
 			}).join("");
 			result = result.replace(/([,;?])(?=\s|["']|$)/g, m => CONFIG.PUNCTUATION_MAP[m] || m);
 			return SpecialContent.restoreNumbers(result, numberTokens);
@@ -886,7 +966,12 @@
 			const walker = document.createTreeWalker(State.content, NodeFilter.SHOW_TEXT, {
 				acceptNode(node) {
 					if (!node.parentElement || node.parentElement.closest("a")) return NodeFilter.FILTER_REJECT;
-					return /\b(ke|di)\s*$/i.test(node.textContent) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+					const match = node.textContent.match(/\b(ke|di)\s*$/i);
+					if (!match) return NodeFilter.FILTER_REJECT;
+					const prepNorm = normMs(match[1]);
+					return (prepNorm === "ke" || prepNorm === "di")
+						? NodeFilter.FILTER_ACCEPT
+						: NodeFilter.FILTER_REJECT;
 				}
 			});
 			for (const node of DOM.collectNodes(walker)) {
@@ -898,7 +983,9 @@
 				const [, before, prep] = match;
 				if (before) node.textContent = before;
 				else node.remove();
-				next.parentNode.insertBefore(document.createTextNode(prep.toLowerCase() === "ke" ? "ک" : "د"), next);
+				const prepNorm = normMs(prep);
+				if (prepNorm !== "ke" && prepNorm !== "di") continue;
+				next.parentNode.insertBefore(document.createTextNode(prepNorm === "ke" ? "ک" : "د"), next);
 				next.innerHTML = TextProcessor.apply(this.convertText(next.textContent, State.dictionary), true);
 				next.setAttribute("data-jawi-fixed", "1");
 				const firstText = next.firstChild;
@@ -965,7 +1052,14 @@
 				}
 			}
 		},
-		validateFormMapping: (formId, rumi, dict) => !!(formId && rumi && dict?.formMappings?.[formId] && dict.formMappings[formId].toLowerCase() === rumi.toLowerCase())
+		// Use normMs for NFC + first-letter-per-word case normalization,
+		// matching dictionary key normalization.
+		validateFormMapping: (formId, rumi, dict) => !!(
+			formId &&
+			rumi &&
+			dict?.formMappings?.[formId] &&
+			dict.formMappings[formId] === normMs(rumi)
+		)
 	};
 	// ============================================================================
 	// UI MANAGEMENT
@@ -979,7 +1073,7 @@
 				.IPA, .IPA *, .chemf, .chemf *, .barelink, .barelink *, .number, .number * { 
 					direction: ltr !important; unicode-bidi: isolate !important; 
 				}
-				.hamza-span { vertical-align: 30%; line-height: 1.0; }
+				.three-quarter-hamza {  display: inline-block;  vertical-align: 0.3em;  line-height: 1; }
 				[dir="rtl"] table.clade td.clade-label { 
 					border-left: none !important; border-right: 1px solid !important; 
 				}
